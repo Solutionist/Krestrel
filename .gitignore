@@ -1,0 +1,16 @@
+.DS_Store
+/node_modules/
+
+# Secrets: every .env file except the committed template
+.env*
+!.env.example
+
+# React Router
+/.react-router/
+/build/
+
+# Tests
+/coverage/
+/test-results/
+/playwright-report/
+/playwright/.cache/

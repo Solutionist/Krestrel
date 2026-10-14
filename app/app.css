@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/*
+ * Krestrel design tokens (ai/ui.md, ADR 0015). Light is the default; dark navy applies with
+ * html[data-theme="dark"] (set before paint by the script in root.tsx). Utilities reference
+ * these variables, so every colour utility (bg-panel, text-muted, ...) follows the active theme.
+ */
+@theme {
+  --color-ink: #f3f6fb; /* app canvas behind the cards */
+  --color-panel: #ffffff; /* cards: sidebar, main, tables */
+  --color-raised: #ffffff; /* menus, popovers, tooltips */
+  --color-subtle: #edf2f9; /* hover fills, segmented tracks, inset wells */
+  --color-rule: #e1e8f2; /* hairlines and card outlines */
+  --color-text: #0f1c30; /* primary text */
+  --color-muted: #5e6e87; /* secondary text */
+  --color-accent: #2f6bdf; /* the one accent: actions, selection, focus */
+  --color-rise: #0d9467; /* up, always with ▲ */
+  --color-fall: #dc3f4a; /* down, always with ▼ */
+  /* Indicator lines (chart only); distinct from rise/fall and the accent. */
+  --color-ind-1: #c58a0b; /* EMA 20 */
+  --color-ind-2: #7c5ce0; /* EMA 50, RSI */
+  --color-ind-3: #0b93a7; /* EMA 100 */
+
+  --shadow-card: 0 1px 2px rgb(15 28 48 / 0.04), 0 6px 24px -8px rgb(15 28 48 / 0.08);
+  --shadow-pop: 0 2px 6px rgb(15 28 48 / 0.06), 0 16px 40px -12px rgb(15 28 48 / 0.22);
+
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --animate-pop-in: pop-in 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme="dark"] {
+  --color-ink: #0a1222;
+  --color-panel: #0f192d;
+  --color-raised: #15213a;
+  --color-subtle: #17233a;
+  --color-rule: #1e2c46;
+  --color-text: #e6edf8;
+  --color-muted: #8597b4;
+  --color-accent: #5b8dff;
+  --color-rise: #33c48f;
+  --color-fall: #ff6670;
+  --color-ind-1: #f0c050;
+  --color-ind-2: #a98bfa;
+  --color-ind-3: #4ccfc3;
+
+  --shadow-card: 0 1px 0 rgb(255 255 255 / 0.02) inset, 0 8px 28px -12px rgb(0 0 0 / 0.55);
+  --shadow-pop: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 18px 48px -12px rgb(0 0 0 / 0.7);
+  color-scheme: dark;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  @apply bg-ink font-sans text-text antialiased;
+  height: 100%;
+  font-feature-settings: "ss01", "cv11";
+}
+
+/* Numbers line up in columns and don't jiggle as prices tick. */
+.tabular-nums,
+input[inputmode="decimal"],
+input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 28%, transparent);
+}
+
+/* Visible keyboard focus everywhere; never removed. */
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-accent) 75%, transparent);
+  outline-offset: 2px;
+}
+
+/* Quiet scrollbars that match the theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-muted) 35%, transparent) transparent;
+}
+
+/* Theme switches cross-fade instead of flashing. Unlayered, so it beats Tailwind's layered
+   transition utilities without !important. */
+html.theme-transition,
+html.theme-transition * {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 200ms ease,
+    box-shadow 200ms ease;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+
+/* Brief price flash on update: the digits tint toward rise/fall and settle, so frequent ticks
+   stay calm (ai/ui.md). */
+@keyframes flash-rise {
+  from {
+    color: var(--color-rise);
+  }
+}
+@keyframes flash-fall {
+  from {
+    color: var(--color-fall);
+  }
+}
+.flash-rise {
+  animation: flash-rise 700ms ease-out;
+}
+.flash-fall {
+  animation: flash-fall 700ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .flash-rise,
+  .flash-fall,
+  .animate-pop-in {
+    animation: none;
+  }
+  html.theme-transition,
+  html.theme-transition * {
+    transition: none;
+  }
+}

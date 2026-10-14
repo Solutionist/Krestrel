@@ -1,0 +1,11 @@
+.git
+.env*
+!.env.example
+node_modules
+build
+.react-router
+coverage
+test-results
+playwright-report
+*.md
+ai

@@ -1,0 +1,49 @@
+# Local only: every published port binds to 127.0.0.1 (ADR 0007, personal-use data licence).
+#   Database only (host dev):  bun run db:up
+#   Full stack:                docker compose up -d --build --wait   → http://127.0.0.1:3000
+
+name: krestrel
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-krestrel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-krestrel}
+      POSTGRES_DB: ${POSTGRES_DB:-krestrel}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PG 18+ image: mount the parent dir; PGDATA is /var/lib/postgresql/18/docker.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # app:
+  #   build: .
+  #   restart: unless-stopped
+  #   env_file:
+  #     - path: .env
+  #       required: false
+  #   environment:
+  #     DATABASE_URL: postgres://${POSTGRES_USER:-krestrel}:${POSTGRES_PASSWORD:-krestrel}@db:5432/${POSTGRES_DB:-krestrel}
+  #     PORT: "3000"
+  #     HOST: 0.0.0.0
+  #   ports:
+  #     - "127.0.0.1:${APP_PORT:-3000}:3000"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+  #     interval: 10s
+  #     timeout: 3s
+  #     retries: 5
+  #     start_period: 10s
+
+volumes:
+  pgdata:

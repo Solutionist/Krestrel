@@ -1,0 +1,7 @@
+[
+  {
+    "T": "error",
+    "code": 406,
+    "msg": "connection limit exceeded"
+  }
+]

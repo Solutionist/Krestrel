@@ -1,0 +1,18 @@
+{
+  "clocks": [
+    {
+      "market": {
+        "acronym": "NYSE",
+        "name": "New York Stock Exchange",
+        "timezone": "America/New_York",
+        "mic": "XNYS"
+      },
+      "timestamp": "2025-06-24T08:15:22.123456-04:00",
+      "is_market_day": true,
+      "next_market_open": "2025-06-24T09:30:00-04:00",
+      "next_market_close": "2025-06-24T16:00:00-04:00",
+      "phase": "pre",
+      "phase_until": "2025-06-24T09:30:00-04:00"
+    }
+  ]
+}
