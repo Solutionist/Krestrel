@@ -41,8 +41,8 @@ Vitest 5 · Playwright · Biome 2 · Bun (package manager only) · Node 24 LTS. 
 - Before finishing: `bun run typecheck && bun run lint && bun run test`.
 
 ## Never
-- Add trading, auth, multi-user, public hosting, or data sharing (personal data licence). Sole exception: user-clicked "Ask Claude" (ADR 0012). Fetching exchange rates (currency codes only, ADR 0013) shares no data; portfolios record trades but never place orders.
-- Touch Claude credentials: AI analysis only runs the user's own `claude` CLI (`app/.server/llm/`).
+- Add trading, auth, multi-user, public hosting, or data sharing (personal data licence). Sole exceptions: AI features the owner set to Claude (ADR 0012, 0020), and Tavily search queries for local models when the owner adds `TAVILY_API_KEY` (ADR 0020). Fetching exchange rates (currency codes only, ADR 0013) shares no data; portfolios record trades but never place orders.
+- Touch Claude credentials: Claude features only run the user's own `claude` CLI (`app/.server/llm/`). Local models only via the owner's loopback Ollama.
 - Bind servers to anything but loopback.
 - Use beta/rc/canary packages or `unstable_*` APIs.
 - Import `lightweight-charts` in server code; create charts only inside effects.
@@ -57,4 +57,4 @@ Vitest 5 · Playwright · Biome 2 · Bun (package manager only) · Node 24 LTS. 
 - UI tokens & rules → `ai/ui.md`
 - Testing → `ai/testing.md`
 - Step-by-step recipes → `ai/workflows.md`
-- Decisions → `ai/decisions/` (0011: daily history + chart intervals)
+- Decisions → `ai/decisions/` (0011: daily history + chart intervals; 0020: Claude or local model per AI feature)

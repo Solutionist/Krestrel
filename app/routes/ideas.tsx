@@ -4,16 +4,18 @@ import * as z from "zod";
 
 import { getMarketHub } from "~/.server/market/instance";
 import { AppShell } from "~/components/app-shell";
-import { claudeModel } from "~/components/chart/outlook-panel";
 import { IdeaCard, IdeaCardSkeleton } from "~/components/ideas/idea-card";
 import { IdeasSidebar } from "~/components/ideas/ideas-sidebar";
 import { SectorMix } from "~/components/ideas/sector-mix";
 import { TopBar } from "~/components/top-bar";
 import { Button } from "~/components/ui/button";
 import { CARD, HEADING } from "~/components/ui/styles";
+import { useAiChoice } from "~/hooks/use-ai";
+import { useDividends } from "~/hooks/use-dividends";
 import { type MarketState, useMarketStream } from "~/hooks/use-market-stream";
 import { useNow } from "~/hooks/use-now";
 import { useTimeZone } from "~/hooks/use-time-zone";
+import { RESEARCH_LABELS } from "~/lib/ai";
 import {
   FOCUSES,
   type Focus,
@@ -92,7 +94,7 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
   const { state } = useMarketStream(loaderData.snapshot);
   const now = useNow();
   const timeZone = useTimeZone();
-  const [model] = claudeModel.use();
+  const { choice: ideasAi } = useAiChoice("ideas");
   const [focus, setFocus] = useState<Focus>("diversify");
   const [results, setResults] = useState<Results>({});
   const [request, setRequest] = useState<Request>({ kind: "idle" });
@@ -106,7 +108,8 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
   const error = request.kind === "error" && request.focus === focus ? request.message : null;
 
   async function findIdeas() {
-    if (localStorage.getItem(CONSENT_KEY) !== "yes") {
+    // Only Claude sends anything about holdings off this computer (tickers and weights).
+    if (ideasAi.provider === "claude" && localStorage.getItem(CONSENT_KEY) !== "yes") {
       const ok = window.confirm(
         "Find ideas sends the tickers you hold and their share of your portfolio (no amounts or share counts) to Anthropic via your Claude Code CLI; Claude also searches the web. Continue?",
       );
@@ -121,7 +124,7 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
       const response = await fetch("/api/ideas", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ focus: asked, model }),
+        body: JSON.stringify({ focus: asked, ai: ideasAi }),
       });
       const parsed = IdeasResponseSchema.safeParse(await response.json());
       if (!parsed.success) {
@@ -173,7 +176,7 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
                 result ? BASIS_TEXT[result.basis] : "Pick a focus, then find ideas",
                 focus === "diversify" ? null : `Focus: ${SECTOR_SHORT[focus]}`,
                 result && !loading
-                  ? `${generatedTime.format(new Date(result.generatedAt))} · ${[result.provider, result.model].filter(Boolean).join(" ")}`
+                  ? `${generatedTime.format(new Date(result.generatedAt))} · ${result.model && !result.provider.includes(result.model) ? `${result.provider} ${result.model}` : result.provider} · ${RESEARCH_LABELS[result.research]}${result.researchNote ? ` (${result.researchNote})` : ""}`
                   : null,
               ]
                 .filter(Boolean)
@@ -212,6 +215,7 @@ function Result({
   onFocus: (focus: Focus) => void;
   state: MarketState;
 }) {
+  const dividends = useDividends(result.ideas.map((idea) => idea.symbol));
   return (
     <>
       <SectorMix
@@ -236,6 +240,11 @@ function Result({
                     quote={state.quotes[idea.symbol] ?? null}
                     // The live watchlist, not the flag saved with the idea, which may be stale.
                     watched={state.watchlist.includes(idea.symbol)}
+                    dividend={
+                      dividends && idea.symbol in dividends.bySymbol
+                        ? { info: dividends.bySymbol[idea.symbol] ?? null, today: dividends.today }
+                        : undefined
+                    }
                   />
                 ))}
               </div>
@@ -292,8 +301,8 @@ function Idle({ onFind }: { onFind: () => void }) {
       <div className="grid max-w-md gap-1">
         <h2 className="text-lg font-semibold tracking-tight text-text">Find stocks worth a look</h2>
         <p className="text-pretty text-muted">
-          Claude reads which sectors your portfolio leans on, searches the market, and suggests 5 to
-          10 stocks that fill the gaps, or that fit the sector you pick.
+          The AI reads which sectors your portfolio leans on and suggests 5 to 10 stocks that fill
+          the gaps, or that fit the sector you pick. Pick Claude or a local model below the list.
         </p>
       </div>
       <ul className="grid w-full max-w-2xl gap-3 text-left sm:grid-cols-3">

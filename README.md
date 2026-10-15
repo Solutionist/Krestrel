@@ -37,26 +37,30 @@ Live prices, candlestick charts, portfolios and AI insight, all running on your 
 
 - **Watchlist**: up to 30 symbols (the Alpaca free-plan streaming limit), with search by ticker or company name. Every symbol is checked against active NYSE/Nasdaq listings. Sort by your own order, symbol, price or change.
 - **Live prices**: change vs. previous close (▲/▼ plus colour), a flash on each update, and a connection indicator.
-- **Candlestick charts**: intervals 1m · 5m · 15m · 30m · 1h · 4h · 1D · 1W · 2W · 1M · 1Y, with up to 10 years of daily history. Zoom, pan, and **Select range** (Shift+drag) to measure any period.
+- **Charts**: intervals 1m · 5m · 15m · 30m · 1h · 4h · 1D · 1W · 2W · 1M · 1Y, with up to 10 years of daily history. Switch between **Candles** and **Heikin Ashi** bars (the numbers shown always stay real prices). Zoom, pan, and **Select range** (Shift+drag) to measure any period.
 - **Indicators**: EMA 20/50/100, Bollinger Bands (20, 2), and RSI 14 with overbought/oversold zones and Buy/Sell markers.
 - **Hindsight analysis**: best past swing trades, support/resistance levels, a trend line, and a rule-based plan (buy zone, stop, targets), all computed locally.
+- **Dividends**: for stocks that pay, a line under the chart shows how often they pay, the amount per share and yield, and the next ex-dividend and pay dates (announced, or "expected" from the usual schedule).
 - **Market status**: open, closed, pre-market or after hours.
 
 ### 💼 Portfolio
 
 - **Named portfolios** of buys and sells: fractional shares, fees, live value, and unrealized/realized/today's P/L (average-cost method). Sells of more shares than you held are refused.
-- **Sortable holdings**: click any column header (▲/▼).
-- **Import from a screenshot**: paste (Ctrl+V) a broker screen such as Dime. A local open vision model reads ticker, shares and average cost; you review and edit, then import. The image never leaves your machine.
+- **Tabs**: Holdings · Trades · Average down, so each tool has its own space.
+- **Sortable holdings**: click any column header (▲/▼). A **Next dividend** column shows each stock's next pay date and the cash it brings for your shares.
+- **Expected dividends**: yearly income (and per month), yield on value and on cost (over holdings with a live price, like the totals), and every payment due in the next 90 days. A payout whose ex-dividend date has passed counts only the shares you held before it. Yearly payers are recognised from about 28 months of history.
+- **Import from a screenshot**: paste (Ctrl+V) a broker screen such as Dime. The AI reads ticker, shares and average cost; you review and edit, then import. With a local model the image never leaves your machine; with Claude it is masked first (see below).
+- **Group holdings** by sector or by type (Growth · Dividend · Risky), with each group's value and share. The AI classifies each stock once; correct any of them from the row's menu, and your choice sticks.
 - **Average-down calculator**: e.g. 50 @ $150, buy at $80, target $120 → 37.5 shares ($3,000).
 - **Display currency**: THB and ~30 others at the European Central Bank's daily rate (only currency codes are sent).
 
-### 🤖 AI (opt-in, per click)
+### 🤖 AI (opt-in)
 
-- **AI outlook**: Claude reads recent news, the analyst consensus and price targets, then suggests buy, exit and take-profit levels with sources.
-- **Stock ideas**: 5–10 growth, dividend and risky picks steered by your portfolio's sector mix. Only tickers and percentage weights are sent.
-- **RSI signals**: a daily Oversold / Buy / Sell / Overbought signal for every watchlist stock and holding.
+- **AI outlook**: reads recent news, the analyst consensus and price targets, then suggests buy, exit and take-profit levels with sources.
+- **Stock ideas**: 5–10 growth, dividend and risky picks steered by your portfolio's sector mix, each with its dividend schedule when it pays one. Only tickers and percentage weights are sent.
+- **RSI signals**: a daily Oversold / Buy / Sell / Overbought signal for every watchlist stock and holding (computed locally, no AI).
 
-Both AI features use **your own** Claude Code CLI and subscription. None of it is financial advice.
+Each AI feature runs on **your own** Claude Code subscription or on a free local model, your choice per feature (see [Optional extras](#optional-extras)). None of it is financial advice.
 
 ### ⚙️ Under the hood
 
@@ -97,10 +101,15 @@ Open http://127.0.0.1:3000. Ports are published on `127.0.0.1` only. Screenshot 
 
 ## Optional extras
 
-| Feature | Needs | Setup |
+Every AI feature (AI outlook, stock ideas, screenshot import, holding groups) can use Claude or a model on your own computer. Pick a default and per-feature models in the app's **AI** menu (top bar).
+
+| Option | Needs | Setup |
 |---|---|---|
-| AI outlook & stock ideas | [Claude Code](https://claude.com/code) + a Claude subscription | Run `claude` once and `/login` |
-| Screenshot import | [Ollama](https://ollama.com) | `ollama pull qwen3-vl:8b-instruct`, then keep Ollama running. A read takes seconds on a GPU or Apple Silicon |
+| Claude | [Claude Code](https://claude.com/code) + a Claude subscription | Run `claude` once and `/login` |
+| Local models | [Ollama](https://ollama.com) | Keep Ollama running, then click Download in the AI menu. Large `qwen3.8:27b` needs a 24 GB GPU; Medium `qwen3-vl:8b-instruct` and Small `qwen3-vl:4b-instruct` run on far less |
+| Web search for local models | A [Tavily](https://tavily.com) API key | Set `TAVILY_API_KEY` in `.env`. Only search queries are sent |
+
+**Privacy with Claude:** every prompt is scrubbed of emails, phone numbers, card and account numbers before it leaves, and Claude Code runs without your personal `CLAUDE.md` files. A screenshot sent to Claude is first masked on your computer: only holdings rows and column headers stay visible, and lines carrying a personal-field label (phone, ID, SSN, date of birth…, in any case) are blacked out with everything else. You approve the masked copy before it goes, and it always goes to the Claude model it was prepared for. Local models skip all of this because nothing leaves your machine.
 
 ## Configuration
 
@@ -120,8 +129,9 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 | `ALPACA_STREAM_FEED` | `iex` | `iex` (free) or `sip` (paid) |
 | `ALPACA_TRADING_URL` | `https://paper-api.alpaca.markets` | Clock and asset lookup. Use `https://api.alpaca.markets` with live-account keys. A trailing `/v2` is fine |
 | `LLM_PROVIDER` | `claude-cli` | `claude-cli` or `none` |
-| `CLAUDE_CLI_PATH`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT_MS` | `claude`, CLI default, `180000` | CLI location, default model (the in-app picker overrides it), and default timeout |
-| `OLLAMA_URL`, `OLLAMA_VISION_MODEL` | `http://127.0.0.1:11434`, `qwen3-vl:8b-instruct` | Local Ollama and the vision model for screenshot import. Loopback URLs only |
+| `CLAUDE_CLI_PATH`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT_MS` | `claude`, CLI default, `180000` | CLI location, model for "Claude (default)", and default timeout |
+| `OLLAMA_URL`, `OLLAMA_MODEL` | `http://127.0.0.1:11434`, `qwen3-vl:8b-instruct` | Local Ollama and the model used for "Local default". Loopback URLs only |
+| `TAVILY_API_KEY` | — | Optional. Web search for local models (outlook, ideas) |
 | `MOCK_SEED`, `MOCK_TICK_MS` | `42`, `1000` | Mock provider seed and tick interval |
 | `POSTGRES_*`, `APP_PORT` | see `.env.example` | Docker Compose settings |
 
@@ -153,6 +163,8 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 | "Port 5173 is already in use" | Another dev server is running; Krestrel won't start a second one, so it never opens a second upstream connection |
 | Only USD in the currency menu | Exchange rates couldn't load; check the server log for `exchange rate refresh failed`, then restart `bun run dev` |
 | Code change to the market hub not picked up | Restart `bun run dev` (the hub survives hot reload on purpose) |
+| Random "connect ETIMEDOUT 127.0.0.1:5432" or "database does not exist" right after `createdb` | Docker Postgres networking hiccup on Windows; reload, or restart Docker Desktop if it keeps happening |
+| `bun run start` fails with `getaddrinfo ENOTFOUND ${HOST:-127.0.0.1}` (Windows) | Run `HOST=127.0.0.1 bunx react-router-serve ./build/server/index.js` instead |
 
 </details>
 
@@ -163,7 +175,9 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 |---|---|
 | "Claude Code isn't signed in" | Run `claude` in a terminal and `/login` |
 | "Claude Code isn't installed here" | Install Claude Code, or set `CLAUDE_CLI_PATH`. On Windows, Krestrel finds `claude.exe` via PATH or npm's `claude.cmd`; otherwise point `CLAUDE_CLI_PATH` at `claude.exe` |
-| "Screenshot import needs Ollama running" / "isn't downloaded yet" | Install Ollama, run `ollama pull qwen3-vl:8b-instruct`, and keep it running. The first read after a break loads the model (~1–2 min) |
+| "… needs Ollama running" / "isn't downloaded yet" (a feature set to a local model) | Install Ollama and keep it running, then click Download in the AI menu (or `ollama pull <model>`). Reopening the AI menu rechecks Ollama, so no page reload is needed. The first request after a break loads the model (~1–2 min) |
+| Outlook or ideas say "No web research" | The feature uses a local model without `TAVILY_API_KEY`; add a key, or pick Claude for it |
+| Dividends show "…" or "Dividend data is unavailable" | Alpaca's corporate-actions data couldn't be reached; reload later (results are cached for 6 hours) |
 
 </details>
 

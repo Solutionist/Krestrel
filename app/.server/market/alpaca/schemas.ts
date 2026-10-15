@@ -220,3 +220,20 @@ export const NewsResponseSchema = z.object({
   news: z.array(NewsArticleSchema),
   next_page_token: z.string().nullish(),
 });
+
+const CashDividendSchema = z.object({
+  symbol: z.string(),
+  rate: z.number(),
+  special: z.boolean().optional(),
+  ex_date: z.iso.date(),
+  payable_date: z.iso.date().nullish(),
+});
+
+/**
+ * GET /v1/corporate-actions?types=cash_dividend (verified against a live response). Other action
+ * types are ignored; `start`/`end` filter on `process_date` (about the pay date).
+ */
+export const CorporateActionsResponseSchema = z.object({
+  corporate_actions: z.looseObject({ cash_dividends: z.array(CashDividendSchema).optional() }),
+  next_page_token: z.string().nullish(),
+});

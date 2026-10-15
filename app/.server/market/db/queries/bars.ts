@@ -199,7 +199,9 @@ export interface CalendarCandleQuery extends Omit<CandleQuery, "timeframe"> {
 /**
  * 1D/1W/2W/1M/1Y candles (ADR 0011): daily history from `bars_1d`, plus days after the newest
  * daily bar built from 1-minute bars (today, and anything not yet backfilled), rolled up with the
- * same `aggregateDays` the browser uses for live updates.
+ * same `aggregateDays` the browser uses for live updates. Same [from, to) range as `getCandles`:
+ * a day counts when its New York midnight (the candle's time) is before `to`, so asking for the
+ * history before the first loaded candle (`to` = its time) never returns that candle again.
  */
 export async function getCalendarCandles(
   db: Database,
@@ -207,7 +209,7 @@ export async function getCalendarCandles(
 ): Promise<Candle[]> {
   const { symbol, historySource } = query;
   const fromDay = nyDay(query.from.getTime());
-  const toDay = nyDay(query.to.getTime());
+  const toDay = nyDay(query.to.getTime() - 1);
 
   const daily = await db
     .select()

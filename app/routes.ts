@@ -12,7 +12,11 @@ export default [
   route("api/watchlist", "routes/api.watchlist.ts"),
   route("api/portfolios", "routes/api.portfolios.ts"),
   route("api/portfolio-import", "routes/api.portfolio-import.ts"),
+  route("api/stock-profiles", "routes/api.stock-profiles.ts"),
+  route("api/ai", "routes/api.ai.ts"),
   route("api/fx", "routes/api.fx.ts"),
+  route("api/dividends", "routes/api.dividends.ts"),
   route("api/signals", "routes/api.signals.ts"),
   route("api/health", "routes/api.health.ts"),
+  route("ocr/:file", "routes/ocr.$file.ts"),
 ] satisfies RouteConfig;

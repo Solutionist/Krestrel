@@ -2,6 +2,12 @@
 // everything source-specific comes from the MarketDataProvider it is given (ADR 0009).
 import type { Logger } from "pino";
 
+import { nyDay } from "~/lib/candles";
+import {
+  DIVIDEND_LOOKAHEAD_DAYS,
+  DIVIDEND_LOOKBACK_DAYS,
+  type DividendPayment,
+} from "~/lib/dividends";
 import {
   type Asset,
   type ConnectionStatus,
@@ -34,6 +40,9 @@ const CLOCK_RETRY_MS = MINUTE;
 const ASSET_LIST_TTL_MS = 24 * 60 * MINUTE;
 const NEWS_LOOKBACK_MS = 30 * 24 * 60 * MINUTE;
 const NEWS_LIMIT = 20;
+/** Dividends change a few times a year; announcements can lag, so refresh a few times a day. */
+const DIVIDEND_TTL_MS = 6 * 60 * MINUTE;
+const DAY = 24 * 60 * MINUTE;
 
 export type HubListener = (event: StreamEvent | { event: "shutdown" }) => void;
 
@@ -277,6 +286,43 @@ export class MarketHub {
       this.#log.warn({ err, symbol }, "news request failed");
       return [];
     }
+  }
+
+  readonly #dividends = new Map<string, { at: number; payments: DividendPayment[] }>();
+
+  /**
+   * Cash dividends per symbol (ADR 0022): about 15 months back and 4 months ahead, cached for 6
+   * hours, one provider call for whatever isn't cached. Optional context: on failure the
+   * uncached symbols are left out (unknown), never reported as paying nothing.
+   */
+  async getDividends(symbols: readonly string[]): Promise<Map<string, DividendPayment[]>> {
+    const now = this.#now();
+    const unique = [...new Set(symbols)];
+    const stale = unique.filter((symbol) => {
+      const cached = this.#dividends.get(symbol);
+      return !cached || now - cached.at > DIVIDEND_TTL_MS;
+    });
+    if (stale.length > 0) {
+      try {
+        const payments = await this.#provider.getDividends(
+          stale,
+          nyDay(now - DIVIDEND_LOOKBACK_DAYS * DAY),
+          nyDay(now + DIVIDEND_LOOKAHEAD_DAYS * DAY),
+        );
+        for (const symbol of stale) this.#dividends.set(symbol, { at: now, payments: [] });
+        for (const { symbol, ...payment } of payments) {
+          this.#dividends.get(symbol)?.payments.push(payment);
+        }
+      } catch (err) {
+        this.#log.warn({ err, symbols: stale.length }, "dividend request failed");
+      }
+    }
+    return new Map(
+      unique.flatMap((symbol) => {
+        const cached = this.#dividends.get(symbol);
+        return cached ? [[symbol, cached.payments] as const] : [];
+      }),
+    );
   }
 
   async addSymbol(input: string): Promise<AddSymbolResult> {

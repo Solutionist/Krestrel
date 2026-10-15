@@ -4,7 +4,7 @@
 
 import * as z from "zod";
 
-import { CLAUDE_MODELS } from "./outlook";
+import { AiChoiceSchema, DEFAULT_AI_CHOICE, RESEARCH_MODES } from "./ai";
 
 /** GICS sectors (the 11 the market uses), so the owner's mix and the ideas line up. */
 export const SECTORS = [
@@ -105,7 +105,7 @@ export type IdeasModelOutput = z.infer<typeof IdeasModelSchema>;
 /** POST /api/ideas body. */
 export const IdeasRequestSchema = z.object({
   focus: z.enum(FOCUSES).default("diversify"),
-  model: z.enum(CLAUDE_MODELS).default("default"),
+  ai: AiChoiceSchema.default(DEFAULT_AI_CHOICE),
 });
 export type IdeasRequest = z.input<typeof IdeasRequestSchema>;
 
@@ -136,6 +136,9 @@ export const IdeasResponseSchema = z.discriminatedUnion("ok", [
     suggestedSectors: z.array(z.enum(SECTORS)),
     ideas: z.array(IdeaSchema),
     generatedAt: z.string(),
+    /** How the run got current facts; `researchNote` says why web research was skipped. */
+    research: z.enum(RESEARCH_MODES),
+    researchNote: z.string().nullable(),
   }),
   z.object({ ok: z.literal(false), error: z.object({ code: z.string(), message: z.string() }) }),
 ]);

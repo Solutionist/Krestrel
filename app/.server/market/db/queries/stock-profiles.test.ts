@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { Sector } from "~/lib/ideas";
+
 import { setupTestDatabase } from "../../../../../tests/db/test-db";
 import { listStockProfiles, saveModelProfiles, saveOwnerProfile } from "./stock-profiles";
 
@@ -31,5 +33,20 @@ describe("stock profiles", () => {
       { symbol: "VOO", sector: null, style: "growth", source: "model" },
     ]);
     expect(await listStockProfiles(db, [])).toEqual([]);
+  });
+
+  it("lets the model fill only the type the owner left empty, keeping the owner's sector", async () => {
+    // The owner picked a sector while the stock was still unclassified (Ollama was down).
+    await saveOwnerProfile(db, { symbol: "RKLB", sector: "Industrials", style: null });
+    await saveModelProfiles(db, [{ symbol: "RKLB", sector: "Energy", style: "risky" }]);
+    expect(await listStockProfiles(db, ["RKLB"])).toEqual([
+      { symbol: "RKLB", sector: "Industrials", style: "risky", source: "owner" },
+    ]);
+  });
+
+  it("refuses a sector outside the 11 the app can label", async () => {
+    const unknown = { symbol: "COIN", sector: "Crypto" as Sector, style: "risky" as const };
+    await expect(saveOwnerProfile(db, unknown)).rejects.toThrow();
+    expect(await listStockProfiles(db, ["COIN"])).toEqual([]);
   });
 });

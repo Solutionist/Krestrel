@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,11 +20,11 @@ function result(partial: Partial<SpawnResult>): SpawnResult {
   return { code: 0, stdout: "", stderr: "", timedOut: false, spawnError: null, ...partial };
 }
 
-function client(run: RunProcess, env: Record<string, string> = {}) {
+function client(run: RunProcess, env: Record<string, string> = {}, model?: string) {
   return createClaudeCliClient(
     { env, logger },
     { run, scratchDir: mkdtempSync(join(tempRoot, "kc-")) },
-  );
+  )(model);
 }
 
 async function errorOf(promise: Promise<unknown>): Promise<LlmError> {
@@ -82,23 +82,38 @@ describe("Claude CLI client", () => {
     expect(options?.timeoutMs).toBe(180_000);
   });
 
-  it("uses the model picked for the request over CLAUDE_MODEL", async () => {
+  it("uses the model picked for the client over CLAUDE_MODEL", async () => {
     const run = vi.fn<RunProcess>(async () =>
       result({ stdout: JSON.stringify({ structured_output: { answer: 1 } }) }),
     );
-    await client(run, { CLAUDE_MODEL: "opus" }).generateStructured({ ...request, model: "haiku" });
+    await client(run, { CLAUDE_MODEL: "opus" }, "haiku").generateStructured(request);
     const args = run.mock.calls[0]?.[1] ?? [];
     expect(args[args.indexOf("--model") + 1]).toBe("haiku");
     expect(args).not.toContain("opus");
   });
 
-  it("enables and pre-approves exactly the requested tools, keeping MCP off, with the request's timeout", async () => {
+  it("redacts personal data from the prompt and system prompt before the CLI sees them", async () => {
+    const run = vi.fn<RunProcess>(async () =>
+      result({ stdout: JSON.stringify({ structured_output: { answer: 1 } }) }),
+    );
+    await client(run).generateStructured({
+      ...request,
+      system: "Reply to jane@example.com",
+      prompt: "AAPL 209.82 · card 4111 1111 1111 1111.",
+    });
+    const [, args = [], options] = run.mock.calls[0] ?? [];
+    expect(options?.stdin).toBe("AAPL 209.82 · card [redacted card].");
+    expect(args[args.indexOf("--system-prompt") + 1]).toBe("Reply to [redacted email]");
+    expect(JSON.stringify(args)).not.toContain("jane@example.com");
+  });
+
+  it("enables and pre-approves only the web tools for web search, keeping MCP off, with the request's timeout", async () => {
     const run = vi.fn<RunProcess>(async () =>
       result({ stdout: JSON.stringify({ structured_output: { answer: 1 } }) }),
     );
     await client(run, { CLAUDE_TIMEOUT_MS: "60000" }).generateStructured({
       ...request,
-      tools: ["WebSearch", "WebFetch"],
+      webSearch: true,
       timeoutMs: 300_000,
     });
     const [, args = [], options] = run.mock.calls[0] ?? [];
@@ -107,6 +122,49 @@ describe("Claude CLI client", () => {
     expect(args).toContain("--strict-mcp-config");
     expect(args).not.toContain("--dangerously-skip-permissions");
     expect(options?.timeoutMs).toBe(300_000);
+  });
+
+  it("hands images to Claude as files in the scratch dir with only the Read tool, then deletes them", async () => {
+    const scratchDir = mkdtempSync(join(tempRoot, "kc-img-"));
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 9]);
+    const seen: { files: string[]; bytes: Uint8Array | null } = { files: [], bytes: null };
+    const run = vi.fn<RunProcess>(async (_command, _args, options) => {
+      seen.files = readdirSync(options.cwd).sort();
+      return result({ stdout: JSON.stringify({ structured_output: { answer: 1 } }) });
+    });
+    const llm = createClaudeCliClient({ env: {}, logger }, { run, scratchDir })();
+    await llm.generateStructured({ ...request, images: [png, jpeg] });
+    const [, args = [], options] = run.mock.calls[0] ?? [];
+    expect(seen.files).toEqual(["image-1.png", "image-2.jpg"]);
+    expect(args[args.indexOf("--tools") + 1]).toBe("Read");
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("Read");
+    expect(options?.stdin).toContain("./image-1.png, ./image-2.jpg");
+    expect(options?.stdin).toMatch(/data$/);
+    expect(readdirSync(scratchDir)).toEqual([]);
+  });
+
+  it("deletes image files even when the run fails", async () => {
+    const scratchDir = mkdtempSync(join(tempRoot, "kc-img-fail-"));
+    const run: RunProcess = async () => result({ code: null, timedOut: true });
+    const llm = createClaudeCliClient({ env: {}, logger }, { run, scratchDir })();
+    const error = await errorOf(
+      llm.generateStructured({ ...request, images: [new Uint8Array([0x89, 0x50])] }),
+    );
+    expect(error.code).toBe("timeout");
+    expect(existsSync(join(scratchDir, "image-1.png"))).toBe(false);
+  });
+
+  it("shares one busy guard across clients for different models", async () => {
+    const { promise, resolve } = Promise.withResolvers<SpawnResult>();
+    const forModel = createClaudeCliClient(
+      { env: {}, logger },
+      { run: () => promise, scratchDir: mkdtempSync(join(tempRoot, "kc-")) },
+    );
+    const first = forModel("opus").generateStructured(request);
+    expect((await errorOf(forModel("haiku").generateStructured(request))).code).toBe("busy");
+    resolve(result({ stdout: JSON.stringify({ structured_output: { answer: 1 } }) }));
+    await expect(first).resolves.toMatchObject({ data: { answer: 1 } });
   });
 
   it("explains how to sign in when the subscription session has expired (CLI exits 0 with is_error)", async () => {
@@ -176,7 +234,10 @@ describe("Claude CLI client with a real child process", () => {
     process.env.ALPACA_SECRET_KEY = "must-not-leak";
     process.env.ANTHROPIC_API_KEY = "would-switch-billing";
     try {
-      const llm = createClaudeCliClient({ env: { CLAUDE_CLI_PATH: fake }, logger }, { scratchDir });
+      const llm = createClaudeCliClient(
+        { env: { CLAUDE_CLI_PATH: fake }, logger },
+        { scratchDir },
+      )();
       const EchoSchema = z.object({
         args: z.array(z.string()),
         stdin: z.string(),

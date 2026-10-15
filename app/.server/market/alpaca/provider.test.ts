@@ -564,4 +564,58 @@ describe("Alpaca REST", () => {
     });
     expect(request?.headers.get("APCA-API-KEY-ID")).toBe("test-key-id");
   });
+
+  it("reads cash dividends across pages, oldest first, keeping specials flagged", async () => {
+    const page = (cashDividends: unknown[], token: string | null) =>
+      json({ corporate_actions: { cash_dividends: cashDividends }, next_page_token: token });
+    const { provider, requests } = restSetup([
+      page(
+        [
+          {
+            symbol: "KO",
+            rate: 0.53,
+            special: false,
+            ex_date: "2026-09-15",
+            payable_date: "2026-10-01",
+            record_date: "2026-09-15",
+            cusip: "191216100",
+            id: "a",
+          },
+        ],
+        "next-1",
+      ),
+      page(
+        [
+          { symbol: "O", rate: 0.2715, ex_date: "2026-08-29", payable_date: null, id: "b" },
+          {
+            symbol: "KO",
+            rate: 1,
+            special: true,
+            ex_date: "2026-06-01",
+            payable_date: "2026-06-15",
+            id: "c",
+          },
+        ],
+        null,
+      ),
+    ]);
+    await expect(provider.getDividends(["KO", "O"], "2025-07-12", "2027-02-12")).resolves.toEqual([
+      { symbol: "KO", exDate: "2026-06-01", payDate: "2026-06-15", amount: 1, special: true },
+      { symbol: "O", exDate: "2026-08-29", payDate: null, amount: 0.2715, special: false },
+      { symbol: "KO", exDate: "2026-09-15", payDate: "2026-10-01", amount: 0.53, special: false },
+    ]);
+    const [first, second] = requests();
+    expect(first?.url.origin + (first?.url.pathname ?? "")).toBe(
+      "https://data.alpaca.markets/v1/corporate-actions",
+    );
+    expect(Object.fromEntries(first?.url.searchParams ?? [])).toEqual({
+      symbols: "KO,O",
+      types: "cash_dividend",
+      start: "2025-07-12",
+      end: "2027-02-12",
+      limit: "1000",
+      sort: "asc",
+    });
+    expect(second?.url.searchParams.get("page_token")).toBe("next-1");
+  });
 });

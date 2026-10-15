@@ -2,6 +2,7 @@
 // ai/market-data.md. One stream connection only: a second one gets error 406.
 import * as z from "zod";
 
+import type { DividendPayment } from "~/lib/dividends";
 import type {
   Asset,
   BarSource,
@@ -28,6 +29,7 @@ import {
   AssetResponseSchema,
   BarsPageSchema,
   ClockResponseSchema,
+  CorporateActionsResponseSchema,
   NewsResponseSchema,
   parseStreamFrame,
   SnapshotsResponseSchema,
@@ -525,6 +527,42 @@ export function createAlpacaProvider(
       }).toString();
       const body = await readBody(await send(url), NewsResponseSchema, "news");
       return body.news.map(newsToNewsItem);
+    },
+
+    async getDividends(symbols, startDay, endDay) {
+      const payments: Array<DividendPayment & { symbol: string }> = [];
+      // Comma lists in the query string; 100 symbols keeps URLs short.
+      for (let index = 0; index < symbols.length; index += 100) {
+        let pageToken: string | null = null;
+        do {
+          const url = new URL(`${config.dataUrl}/v1/corporate-actions`);
+          url.search = new URLSearchParams({
+            symbols: symbols.slice(index, index + 100).join(","),
+            types: "cash_dividend",
+            start: startDay,
+            end: endDay,
+            limit: "1000",
+            sort: "asc",
+            ...(pageToken ? { page_token: pageToken } : {}),
+          }).toString();
+          const body = await readBody(
+            await send(url),
+            CorporateActionsResponseSchema,
+            "corporate actions",
+          );
+          for (const dividend of body.corporate_actions.cash_dividends ?? []) {
+            payments.push({
+              symbol: dividend.symbol,
+              exDate: dividend.ex_date,
+              payDate: dividend.payable_date ?? null,
+              amount: dividend.rate,
+              special: dividend.special ?? false,
+            });
+          }
+          pageToken = body.next_page_token ?? null;
+        } while (pageToken);
+      }
+      return payments.sort((a, b) => a.exDate.localeCompare(b.exDate));
     },
   };
 }

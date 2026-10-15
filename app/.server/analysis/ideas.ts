@@ -1,5 +1,6 @@
-// Stock ideas (ADR 0017): the owner's mix by value (symbols and weights only) steers Claude, which
-// researches with web search and returns growth / dividend / risky ideas. Ideas, not advice.
+// Stock ideas (ADR 0017, 0020): the owner's mix by value (symbols and weights only) steers the
+// chosen AI, which returns growth / dividend / risky ideas. Claude researches with web search; a
+// local model gets Tavily results or only its own knowledge. Ideas, not advice.
 import {
   type Focus,
   IDEA_CATEGORIES,
@@ -14,7 +15,6 @@ import {
   type Sector,
 } from "~/lib/ideas";
 import { type QuoteSnapshot, SymbolSchema } from "~/lib/market";
-import type { ClaudeModel } from "~/lib/outlook";
 import {
   computePositions,
   mergePositions,
@@ -23,12 +23,19 @@ import {
   valuePosition,
 } from "~/lib/portfolio";
 
-import type { LlmClient, LlmTool } from "../llm/types";
-import { clamp, httpUrl } from "./outlook";
+import {
+  type CitationCheck,
+  citationCheck,
+  describeResults,
+  httpUrl,
+  type Research,
+} from "../llm/research";
+import type { LlmClient } from "../llm/types";
+import type { WebSearchQuery } from "../llm/web-search";
+import { clamp } from "./outlook";
 
 /** Researching several stocks takes minutes, like the outlook. */
 export const IDEAS_TIMEOUT_MS = 300_000;
-export const IDEAS_TOOLS: readonly LlmTool[] = ["WebSearch", "WebFetch"];
 const NAME_MAX = 80;
 const METRIC_MAX = 24;
 const SOURCE_TITLE_MAX = 60;
@@ -51,8 +58,34 @@ const BASIS_LINES: Record<IdeasBasis, string> = {
 };
 
 const SYSTEM_PROMPT = `You are a terse equity researcher suggesting stocks worth a closer look for one private investor. These are ideas, not financial advice: no hype, no promises, no filler.
-Use only the data given and what you find with web search in this session. Never invent figures, tickers, or URLs; leave a metric out rather than guess.
+Use only the data given and the research available in this session. Never invent figures, tickers, or URLs; leave a metric out rather than guess.
 Reply with JSON only, through the structured output.`;
+
+/** What Krestrel searches on Tavily for a local model (Claude searches on its own). */
+export function ideasQueries(focus: Focus, now: number): WebSearchQuery[] {
+  const year = new Date(now).getUTCFullYear();
+  const scope = focus === "diversify" ? "" : ` ${focus} sector`;
+  return [
+    {
+      query: `best growth stocks to buy${scope} ${year}`,
+      topic: "finance",
+      timeRange: "month",
+      maxResults: 5,
+    },
+    {
+      query: `best dividend stocks${scope} ${year} yield`,
+      topic: "finance",
+      timeRange: "month",
+      maxResults: 5,
+    },
+    {
+      query: `speculative high risk high reward stocks${scope} ${year}`,
+      topic: "finance",
+      timeRange: "month",
+      maxResults: 4,
+    },
+  ];
+}
 
 /** Open positions across every portfolio (each replayed on its own, then merged by symbol). */
 export function openPositions(trades: readonly Trade[]): Position[] {
@@ -97,6 +130,8 @@ export interface IdeasInput {
   holdings: ReadonlyArray<{ symbol: string; weightPct: number }>;
   /** Epoch ms of "today", so the research is current. */
   now: number;
+  /** How this run gets current facts (see `gatherResearch`). */
+  research: Research;
 }
 
 export function buildIdeasPrompt(input: IdeasInput): string {
@@ -113,13 +148,20 @@ export function buildIdeasPrompt(input: IdeasInput): string {
       ? holdings.map((holding) => `- ${holding.symbol} ${holding.weightPct.toFixed(1)}%`)
       : []),
     focusLine,
+    ...(input.research.mode === "tavily"
+      ? [
+          "",
+          "Web search results (date · title · url, then an excerpt):",
+          ...describeResults(input.research.results),
+        ]
+      : []),
     "",
     "Task:",
     holdings.length
       ? "1. Sectors: give the GICS sector of every symbol listed above, one entry each."
       : "1. Sectors: there are no holdings, so leave holdingSectors empty.",
     `2. Summary: how the mix is spread across sectors and what it lacks (at most ${IDEA_SUMMARY_MAX} characters). Then up to ${MAX_SUGGESTED} under-represented sectors worth adding, most useful first.`,
-    "3. Ideas: use web search for current facts (dividend yield, revenue and earnings growth, valuation, recent news), then pick 6 to 9 US-listed common stocks (NYSE or Nasdaq; no ETFs, funds, preferreds, warrants or OTC). About a third in each category:",
+    `3. Ideas: ${RESEARCH_STEPS[input.research.mode]} Pick 6 to 9 US-listed common stocks (NYSE or Nasdaq; no ETFs, funds, preferreds, warrants or OTC). About a third in each category:`,
     ...IDEA_CATEGORIES.map(
       (category) =>
         `   - ${category} (${IDEA_CATEGORY_LABELS[category].name}): ${CATEGORY_BRIEFS[category]}`,
@@ -128,16 +170,30 @@ export function buildIdeasPrompt(input: IdeasInput): string {
       ? `   Exclude stocks already held: ${held.join(", ")}.`
       : "   Spread the ideas across sectors.",
     `   For each idea: why it is worth a look (thesis), how it fits or diversifies this mix (fit) and its main risk, each at most ${IDEA_LINE_MAX} characters.`,
-    `4. Evidence: up to ${MAX_METRICS} concrete metrics per idea with units (e.g. "Dividend yield": "3.1%", "Revenue growth": "+24% YoY", "Forward P/E": "18x"), labels and values at most ${METRIC_MAX} characters, and up to ${MAX_SOURCES} real source URLs you found (never build or guess a URL).`,
+    `4. Evidence: up to ${MAX_METRICS} concrete metrics per idea with units (e.g. "Dividend yield": "3.1%", "Revenue growth": "+24% YoY", "Forward P/E": "18x"), labels and values at most ${METRIC_MAX} characters, and ${SOURCE_STEPS[input.research.mode]}`,
   ].join("\n");
 }
 
-function sources(list: IdeasModelOutput["ideas"][number]["sources"]) {
+const RESEARCH_STEPS: Record<Research["mode"], string> = {
+  web: "use web search for current facts (dividend yield, revenue and earnings growth, valuation, recent news).",
+  tavily:
+    "use the web search results above for current facts (dividend yield, growth, valuation, news); you cannot browse further, so prefer stocks those results discuss.",
+  none: "you have no web access, so use what you know; your figures may be out of date, so give metrics only where you are confident.",
+};
+
+const SOURCE_STEPS: Record<Research["mode"], string> = {
+  web: `up to ${MAX_SOURCES} real source URLs you found (never build or guess a URL).`,
+  tavily: `up to ${MAX_SOURCES} source URLs, only from the results above, exactly as written.`,
+  none: "no sources (leave sources empty): you have none to cite.",
+};
+
+/** Real sources the answer may cite (`isCitable`), once per link, at most `MAX_SOURCES`. */
+function sources(list: IdeasModelOutput["ideas"][number]["sources"], isCitable: CitationCheck) {
   const seen = new Set<string>();
   const kept: IdeasModelOutput["ideas"][number]["sources"] = [];
   for (const source of list) {
     const url = httpUrl(source.url);
-    if (!url || seen.has(url)) continue;
+    if (!url || seen.has(url) || !isCitable(url)) continue;
     seen.add(url);
     kept.push({ title: clamp(source.title, SOURCE_TITLE_MAX) || new URL(url).hostname, url });
     if (kept.length === MAX_SOURCES) break;
@@ -147,12 +203,13 @@ function sources(list: IdeasModelOutput["ideas"][number]["sources"]) {
 
 /**
  * Holds the answer to the contract the page relies on: valid, unique tickers not already held
- * (and in the focus sector, when one is set), texts within budget, only http(s) sources, at most
- * 10 ideas, and sectors only for the symbols that were sent.
+ * (and in the focus sector, when one is set), texts within budget, only http(s) sources (only
+ * ones it was given, for a model that couldn't browse), at most 10 ideas, and sectors only for
+ * the symbols that were sent.
  */
 export function sanitizeIdeas(
   output: IdeasModelOutput,
-  options: { held: readonly string[]; focus: Focus },
+  options: { held: readonly string[]; focus: Focus; isCitable: CitationCheck },
 ): IdeasModelOutput {
   const held = new Set(options.held.map((symbol) => symbol.toUpperCase()));
   const seen = new Set<string>();
@@ -179,7 +236,7 @@ export function sanitizeIdeas(
         }))
         .filter((metric) => metric.label && metric.value)
         .slice(0, MAX_METRICS),
-      sources: sources(idea.sources),
+      sources: sources(idea.sources, options.isCitable),
     });
     if (ideas.length === MAX_IDEAS) break;
   }
@@ -198,23 +255,26 @@ export function sanitizeIdeas(
   };
 }
 
-/** One Claude run with web research; the result is schema-validated, then sanitised. */
+/**
+ * One run with the chosen AI; the result is schema-validated, then sanitised. A model that can't
+ * browse may only cite the research's links.
+ */
 export async function generateIdeas(
   llm: LlmClient,
-  input: IdeasInput & { model: ClaudeModel },
+  input: IdeasInput,
 ): Promise<{ ideas: IdeasModelOutput; model: string | null }> {
   const result = await llm.generateStructured({
     system: SYSTEM_PROMPT,
     prompt: buildIdeasPrompt(input),
     schema: IdeasModelSchema,
-    model: input.model === "default" ? undefined : input.model,
-    tools: IDEAS_TOOLS,
+    webSearch: input.research.mode === "web",
     timeoutMs: IDEAS_TIMEOUT_MS,
   });
   return {
     ideas: sanitizeIdeas(result.data, {
       held: input.holdings.map((holding) => holding.symbol),
       focus: input.focus,
+      isCitable: citationCheck(input.research, []),
     }),
     model: result.model,
   };

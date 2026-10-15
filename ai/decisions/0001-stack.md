@@ -44,6 +44,8 @@ Krestrel must use the latest stable release of every dependency (no beta/rc/cana
 | pino-pretty | 13.2.0 | Dev log formatting (dev only) |
 | lightweight-charts | 5.2.1 | TradingView chart (ADR 0010) |
 | @fontsource/ibm-plex-sans, @fontsource/ibm-plex-mono | 5.3.0 | Self-hosted UI fonts |
+| tesseract.js | 7.0.0 | On-device OCR that masks screenshots before Claude sees them (ADR 0021) |
+| @tesseract.js-data/eng | 1.0.0 | English OCR model, served locally from `/ocr/*` (ADR 0021) |
 
 Resolved now, installed in the phase that first needs them:
 

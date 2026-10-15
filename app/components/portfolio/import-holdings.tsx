@@ -3,17 +3,23 @@ import {
   CircleNotchIcon,
   ImageSquareIcon,
   PlusIcon,
+  ShieldCheckIcon,
   WarningCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { type DragEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 
+import { FeatureModelPicker } from "~/components/ai/ai-model-picker";
 import { Button, IconButton } from "~/components/ui/button";
 import { FIELD, HEADING, LABEL } from "~/components/ui/styles";
+import { useAiChoice } from "~/hooks/use-ai";
+import type { AiChoice } from "~/lib/ai";
 import { nyDay } from "~/lib/candles";
 import { type HoldingsReadResult, MAX_IMPORT_ROWS } from "~/lib/holdings-import";
 import { type PortfolioActionResult, type TradeInput, TradeInputSchema } from "~/lib/portfolio";
+
+import { maskForClaude } from "./mask-screenshot";
 
 /**
  * Largest image sent to the vision model. Its cost grows with pixels (~1 token per 32×32 px);
@@ -58,6 +64,7 @@ export function ImportHoldings({
   portfolios,
   portfolioId,
   image,
+  visible,
   onClose,
 }: {
   portfolios: readonly { id: string; name: string }[];
@@ -65,6 +72,8 @@ export function ImportHoldings({
   portfolioId: string | null;
   /** A screenshot pasted on the page; read as soon as it arrives. */
   image: Blob | null;
+  /** False while another tab is shown (the panel stays mounted, only hidden). */
+  visible: boolean;
   onClose: () => void;
 }) {
   const ids = useId();
@@ -89,10 +98,16 @@ export function ImportHoldings({
   const readResult = reader.data;
   const saveResult = saver.data;
   const { submit } = reader;
+  const { choice } = useAiChoice("import");
 
+  // Bring the panel into view when it opens or gets a new screenshot, once it is actually shown:
+  // a paste on another tab mounts it hidden and switches tabs a moment later.
+  const scrolledFor = useRef<Blob | null | undefined>(undefined);
   useEffect(() => {
+    if (!visible || scrolledFor.current === image) return;
+    scrolledFor.current = image;
     panel.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, []);
+  }, [visible, image]);
 
   // Follow the portfolio picked in the sidebar while the panel is open.
   useEffect(() => {
@@ -106,32 +121,125 @@ export function ImportHoldings({
     [preview],
   );
 
+  // Claude only: the on-device masked copy waiting for the owner's OK (ADR 0021), with the Claude
+  // choice it was made and approved for, so changing the model can't redirect it elsewhere.
+  const [masked, setMasked] = useState<{
+    url: string;
+    blob: Blob;
+    hidden: number;
+    ai: AiChoice;
+  } | null>(null);
+  const [maskProgress, setMaskProgress] = useState<number | null>(null);
+  useEffect(
+    () => () => {
+      if (masked) URL.revokeObjectURL(masked.url);
+    },
+    [masked],
+  );
+
+  /**
+   * Set when this panel's current screenshot is sent, with the answer the reader held at that
+   * moment: only a different answer belongs to this screenshot. A newer screenshot clears it, so
+   * a late answer for an older one (or its error) never fills the review next to another preview.
+   * Compared by identity because router updates can render before the reader reports "submitting".
+   */
+  const [awaitingRead, setAwaitingRead] = useState<{
+    before: HoldingsReadResult | undefined;
+  } | null>(null);
+  const latestResult = useRef(readResult);
+  latestResult.current = readResult;
+
+  const send = useCallback(
+    (screenshot: Blob, ai: AiChoice, isMasked: boolean) => {
+      const form = new FormData();
+      form.append("image", screenshot, "screenshot.png");
+      form.append("ai", JSON.stringify(ai));
+      if (isMasked) form.append("masked", "1");
+      setAwaitingRead({ before: latestResult.current });
+      submit(form, {
+        method: "post",
+        action: "/api/portfolio-import",
+        encType: "multipart/form-data",
+      });
+    },
+    [submit],
+  );
+
+  /** Bumped by every read and on unmount: a read whose number is no longer current is dropped. */
+  const readId = useRef(0);
+  useEffect(
+    () => () => {
+      readId.current += 1;
+    },
+    [],
+  );
+
   const read = useCallback(
     async (file: Blob) => {
       if (!file.type.startsWith("image/")) {
         setProblem({ message: "That isn't an image. Paste or choose a screenshot." });
         return;
       }
+      // A newer screenshot (or closing the panel) makes this read stale: its result, including a
+      // masked image waiting for "Send to Claude", must never show up next to another preview.
+      const id = ++readId.current;
+      const current = () => id === readId.current;
       setProblem(null);
       setRows(null);
+      setAwaitingRead(null);
       setSaved(null);
+      setMasked(null);
       setPreview(URL.createObjectURL(file));
       setPreparing(true);
+      let prepared: Blob;
       try {
-        const form = new FormData();
-        form.append("image", await prepareForVision(file), "screenshot.png");
-        submit(form, {
-          method: "post",
-          action: "/api/portfolio-import",
-          encType: "multipart/form-data",
-        });
+        prepared = await prepareForVision(file);
       } catch {
+        if (!current()) return;
         setProblem({ message: "Couldn't open that image. Try a PNG or JPEG screenshot." });
-      } finally {
         setPreparing(false);
+        return;
+      }
+      if (!current()) return;
+      if (choice.provider !== "claude") {
+        send(prepared, choice, false);
+        setPreparing(false);
+        return;
+      }
+      // Claude: hide everything but the holdings rows on this computer, then ask before sending.
+      setMaskProgress(0);
+      try {
+        const result = await maskForClaude(prepared, (fraction) => {
+          if (current()) setMaskProgress(fraction);
+        });
+        if (!current()) return;
+        if (result.keptLines === 0) {
+          setProblem({
+            message:
+              "Couldn't find any holdings rows to keep, so nothing was sent. Crop the screenshot to your positions, or pick a local model.",
+          });
+        } else {
+          setMasked({
+            url: URL.createObjectURL(result.image),
+            blob: result.image,
+            hidden: result.hiddenLines,
+            ai: choice,
+          });
+        }
+      } catch {
+        if (!current()) return;
+        setProblem({
+          message:
+            "Couldn't hide personal details on this computer, so nothing was sent. Try again, or pick a local model.",
+        });
+      } finally {
+        if (current()) {
+          setMaskProgress(null);
+          setPreparing(false);
+        }
       }
     },
-    [submit],
+    [send, choice],
   );
 
   useEffect(() => {
@@ -142,6 +250,7 @@ export function ImportHoldings({
 
   useEffect(() => {
     if (reader.state !== "idle" || !readResult?.ok) return;
+    if (!awaitingRead || readResult === awaitingRead.before) return;
     const { holdings } = readResult;
     setRows(
       holdings.slice(0, MAX_IMPORT_ROWS).map((holding) => ({
@@ -156,7 +265,7 @@ export function ImportHoldings({
         message: `Read ${holdings.length} holdings; one import takes ${MAX_IMPORT_ROWS}. Import these, then crop the rest into another screenshot.`,
       });
     }
-  }, [reader.state, readResult]);
+  }, [reader.state, readResult, awaitingRead]);
 
   useEffect(() => {
     if (saver.state !== "idle" || !saveResult?.ok) return;
@@ -218,7 +327,14 @@ export function ImportHoldings({
   const message =
     problem?.message ??
     (saveResult && !saveResult.ok && !saving ? saveResult.error.message : null) ??
-    (readResult && !readResult.ok && !reading && rows === null ? readResult.error.message : null);
+    (awaitingRead &&
+    readResult !== awaitingRead.before &&
+    readResult &&
+    !readResult.ok &&
+    !reading &&
+    rows === null
+      ? readResult.error.message
+      : null);
   const warning =
     saved !== null
       ? saveResult?.ok
@@ -241,8 +357,21 @@ export function ImportHoldings({
             Import from a screenshot
           </h3>
           <p className="text-xs text-muted">
-            Read by your local vision model (Ollama); the image isn't sent anywhere.
+            {rows !== null && readResult?.ok
+              ? `Read by ${readResult.readBy}. Check every row before importing.`
+              : choice.provider === "claude"
+                ? "Read by Claude: personal details are hidden on this computer first, and you see exactly what is sent before it goes to Anthropic."
+                : "Read by a model on this computer (Ollama); the image isn't sent anywhere."}
           </p>
+          {rows === null && saved === null && (
+            <div className="mt-2 w-80 max-w-full">
+              <FeatureModelPicker
+                feature="import"
+                label="Screenshot reader model"
+                disabled={reading || masked !== null}
+              />
+            </div>
+          )}
         </div>
         <IconButton label="Close import" onClick={onClose}>
           <XIcon aria-hidden size={15} />
@@ -264,6 +393,40 @@ export function ImportHoldings({
             </Button>
           </div>
         </div>
+      ) : masked && rows === null && !reading ? (
+        <div className="grid gap-3">
+          <div className="grid gap-1">
+            <p className="flex items-center gap-1.5 text-sm font-medium text-text">
+              <ShieldCheckIcon aria-hidden size={16} className="shrink-0 text-accent" />
+              This is exactly what Claude will see
+            </p>
+            <p className="text-xs text-pretty text-muted">
+              Personal details were hidden on this computer: black areas are never sent (
+              {masked.hidden} {masked.hidden === 1 ? "line" : "lines"} hidden). If a holding you
+              need is blacked out, crop the screenshot to your positions or pick a local model.
+            </p>
+          </div>
+          <img
+            src={masked.url}
+            alt="The masked screenshot that would be sent to Claude"
+            className="max-h-[28rem] w-auto max-w-full justify-self-start rounded-lg ring-1 ring-rule/70"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="primary"
+              onClick={() => {
+                send(masked.blob, masked.ai, true);
+                setMasked(null);
+              }}
+            >
+              <ShieldCheckIcon aria-hidden size={16} />
+              Send to Claude
+            </Button>
+            <Button variant="ghost" onClick={() => setMasked(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
       ) : rows === null ? (
         <section
           aria-label="Screenshot drop zone"
@@ -281,7 +444,9 @@ export function ImportHoldings({
           {reading ? (
             <p className="flex items-center gap-2 text-sm text-muted">
               <CircleNotchIcon aria-hidden size={16} className="animate-spin text-accent" />
-              Reading the screenshot… the first read of a session also loads the model.
+              {maskProgress !== null
+                ? `Hiding personal details on this computer… ${Math.round(maskProgress * 100)}%`
+                : "Reading the screenshot… the first read of a session also loads the model."}
             </p>
           ) : (
             <div className="grid justify-items-center gap-2">

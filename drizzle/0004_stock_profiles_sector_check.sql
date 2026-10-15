@@ -1,0 +1,1 @@
+ALTER TABLE "stock_profiles" ADD CONSTRAINT "stock_profiles_sector_check" CHECK ("stock_profiles"."sector" IN ('Information Technology', 'Communication Services', 'Consumer Discretionary', 'Consumer Staples', 'Health Care', 'Financials', 'Industrials', 'Energy', 'Utilities', 'Real Estate', 'Materials'));

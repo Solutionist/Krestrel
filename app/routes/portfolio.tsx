@@ -1,33 +1,48 @@
 import {
+  CalculatorIcon,
+  ChartPieSliceIcon,
+  CircleNotchIcon,
   ImageSquareIcon,
+  ListBulletsIcon,
   PencilSimpleIcon,
   TrashIcon,
   WalletIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { useFetcher, useSearchParams } from "react-router";
+import { type ShouldRevalidateFunctionArgs, useFetcher, useSearchParams } from "react-router";
 
 import { db } from "~/.server/market/db/instance";
 import { listPortfolios, listTrades } from "~/.server/market/db/queries/portfolios";
+import { listStockProfiles } from "~/.server/market/db/queries/stock-profiles";
 import { getMarketHub } from "~/.server/market/instance";
 import { AppShell } from "~/components/app-shell";
 import { AverageCalculator } from "~/components/portfolio/average-calculator";
-import { ChangePill, HoldingsTable } from "~/components/portfolio/holdings-table";
+import { DIVIDEND_HORIZON_DAYS, DividendIncome } from "~/components/portfolio/dividend-income";
+import {
+  ChangePill,
+  GroupingControl,
+  HoldingsTable,
+  holdingsGrouping,
+} from "~/components/portfolio/holdings-table";
 import { ImportHoldings } from "~/components/portfolio/import-holdings";
 import { type PortfolioEntry, PortfolioList } from "~/components/portfolio/portfolio-list";
 import { TradeForm } from "~/components/portfolio/trade-form";
 import { TradeHistory } from "~/components/portfolio/trade-history";
 import { TopBar } from "~/components/top-bar";
 import { Button, IconButton } from "~/components/ui/button";
-import { CARD, FIELD, HEADING, LABEL, toneOf } from "~/components/ui/styles";
+import { CARD, FIELD, LABEL, toneOf } from "~/components/ui/styles";
+import { TabBar } from "~/components/ui/tab-bar";
 import { type DisplayCurrency, useCurrency } from "~/hooks/use-currency";
+import { useDividends } from "~/hooks/use-dividends";
 import { useMarketStream } from "~/hooks/use-market-stream";
 import { useNow } from "~/hooks/use-now";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
 import { useRsiSignals } from "~/hooks/use-rsi-signals";
+import { useStockProfiles } from "~/hooks/use-stock-profiles";
 import { useTimeZone } from "~/hooks/use-time-zone";
 import { BASE_CURRENCY, formatMoney } from "~/lib/currency";
+import { dividendTally } from "~/lib/dividends";
 import {
   computePositions,
   mergePositions,
@@ -38,6 +53,7 @@ import {
   type Trade,
   valuePosition,
 } from "~/lib/portfolio";
+import { onlyViewChanged } from "~/lib/portfolio-view";
 import { describeConnection, describeMarket } from "~/lib/status-text";
 
 import type { Route } from "./+types/portfolio";
@@ -46,9 +62,29 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Portfolio · Krestrel" }];
 }
 
+/**
+ * Switching tabs only changes `?view=`, which nothing the loader returns depends on: keep the
+ * loaded data instead of a server round trip. Saves, imports, `?p=` changes and a navigation to
+ * the same URL still reload.
+ */
+export function shouldRevalidate({
+  currentUrl,
+  nextUrl,
+  formMethod,
+  defaultShouldRevalidate,
+}: ShouldRevalidateFunctionArgs) {
+  if (formMethod) return defaultShouldRevalidate;
+  return onlyViewChanged(currentUrl, nextUrl) ? false : defaultShouldRevalidate;
+}
+
+const VIEWS = ["holdings", "trades", "calculator"] as const;
+type View = (typeof VIEWS)[number];
+
 export async function loader() {
   const [portfolios, trades] = await Promise.all([listPortfolios(db), listTrades(db)]);
-  return { snapshot: getMarketHub().snapshot(), portfolios, trades };
+  // Sector and type of everything ever traded, for grouping holdings (ADR 0019).
+  const profiles = await listStockProfiles(db, [...new Set(trades.map((trade) => trade.symbol))]);
+  return { snapshot: getMarketHub().snapshot(), portfolios, trades, profiles };
 }
 
 export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
@@ -67,6 +103,20 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
   const [editing, setEditing] = useState<Trade | null>(null);
   // Open import panel; a fresh object per paste so the same image can be read again.
   const [importing, setImporting] = useState<{ image: Blob | null } | null>(null);
+  // The tab lives in the URL (?view=), so reloads and portfolio switches keep it.
+  const view: View = VIEWS.find((candidate) => candidate === params.get("view")) ?? "holdings";
+  const setView = useCallback(
+    (next: View) =>
+      setParams(
+        (current) => {
+          if (next === "holdings") current.delete("view");
+          else current.set("view", next);
+          return current;
+        },
+        { replace: true, preventScrollReset: true },
+      ),
+    [setParams],
+  );
 
   // A screenshot pasted anywhere on the page goes straight to the import panel.
   const hasPortfolios = portfolios.length > 0;
@@ -80,10 +130,11 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
       if (!image) return;
       event.preventDefault();
       setImporting({ image });
+      setView("holdings");
     }
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [hasPortfolios]);
+  }, [hasPortfolios, setView]);
 
   const requested = params.get("p");
   // With one portfolio, "All" would just repeat it.
@@ -138,6 +189,22 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
   const suggestions = [
     ...new Set([...state.watchlist, ...positions.map((position) => position.symbol)]),
   ].sort();
+  const [grouping, setGrouping] = holdingsGrouping.use();
+  const heldSymbols = positions
+    .filter((position) => position.shares > 0)
+    .map((position) => position.symbol);
+  const stockProfiles = useStockProfiles(loaderData.profiles, heldSymbols, grouping);
+  // Closed positions too: a payout whose ex-date has passed is paid even after selling.
+  const dividends = useDividends(positions.map((position) => position.symbol));
+  const tally = dividends
+    ? dividendTally({
+        positions,
+        trades: visibleTrades,
+        dividends: dividends.bySymbol,
+        today: dividends.today,
+        horizonDays: DIVIDEND_HORIZON_DAYS,
+      })
+    : null;
 
   const select = useCallback(
     (id: string | null) => {
@@ -181,78 +248,168 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
             />
           </div>
         ) : (
-          <div className="mx-auto grid max-w-[1180px] gap-8 px-6 py-6">
+          <div className="mx-auto grid max-w-[1180px] gap-6 px-6 py-6">
             <div className="grid gap-5">
               <PortfolioHeader portfolio={selected} />
               <Summary totals={totals} display={display} />
+              {dividends && tally && (
+                <DividendIncome
+                  tally={tally}
+                  today={dividends.today}
+                  totals={totals}
+                  display={display}
+                />
+              )}
             </div>
 
-            <section aria-labelledby="holdings-heading" className="grid gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <h2 id="holdings-heading" className={HEADING}>
-                  Holdings
-                </h2>
-                {!importing && (
-                  <Button variant="ghost" size="sm" onClick={() => setImporting({ image: null })}>
-                    <ImageSquareIcon aria-hidden size={14} />
-                    Import screenshot
-                  </Button>
+            <div className="grid gap-4">
+              <TabBar
+                id="portfolio"
+                label="Portfolio sections"
+                value={view}
+                onChange={setView}
+                options={[
+                  {
+                    value: "holdings",
+                    label: "Holdings",
+                    Icon: ChartPieSliceIcon,
+                    count: positions.filter((position) => position.shares > 0).length,
+                  },
+                  {
+                    value: "trades",
+                    label: "Trades",
+                    Icon: ListBulletsIcon,
+                    count: visibleTrades.length,
+                  },
+                  { value: "calculator", label: "Average down", Icon: CalculatorIcon },
+                ]}
+              />
+
+              <div
+                role="tabpanel"
+                id="portfolio-panel"
+                aria-labelledby={`portfolio-tab-${view}`}
+                className="grid gap-3"
+              >
+                {/* Mounted outside the tab switch (only hidden), so moving between tabs keeps the
+                    rows under review and never sends the screenshot to the AI again. */}
+                {importing && (
+                  <div hidden={view !== "holdings"}>
+                    <ImportHoldings
+                      portfolios={portfolios}
+                      portfolioId={selectedId}
+                      image={importing.image}
+                      visible={view === "holdings"}
+                      onClose={() => setImporting(null)}
+                    />
+                  </div>
+                )}
+                {view === "holdings" && (
+                  <>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {positions.some((position) => position.shares > 0) && (
+                        <GroupingControl value={grouping} onChange={setGrouping} />
+                      )}
+                      {!importing && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setImporting({ image: null })}
+                        >
+                          <ImageSquareIcon aria-hidden size={14} />
+                          Import screenshot
+                        </Button>
+                      )}
+                    </div>
+                    {grouping !== "none" && stockProfiles.classifying > 0 && (
+                      <p role="status" className="flex items-center gap-2 text-xs text-muted">
+                        <CircleNotchIcon
+                          aria-hidden
+                          size={14}
+                          className="animate-spin text-accent"
+                        />
+                        Classifying {stockProfiles.classifying}{" "}
+                        {stockProfiles.classifying === 1 ? "holding" : "holdings"} with AI…
+                      </p>
+                    )}
+                    {grouping !== "none" && stockProfiles.error && (
+                      <p
+                        role="alert"
+                        className="flex flex-wrap items-center gap-1.5 text-xs text-fall"
+                      >
+                        <WarningCircleIcon aria-hidden size={14} className="shrink-0" />
+                        {stockProfiles.error}
+                        <Button variant="ghost" size="sm" onClick={stockProfiles.retry}>
+                          Try again
+                        </Button>
+                      </p>
+                    )}
+                    {positions.length === 0 ? (
+                      !importing && (
+                        <EmptyState
+                          title={<h2>Nothing held yet</h2>}
+                          hint="Record a buy on the Trades tab, or paste a screenshot of your broker's holdings (Ctrl+V)."
+                          inline
+                        />
+                      )
+                    ) : (
+                      <HoldingsTable
+                        positions={positions}
+                        display={display}
+                        signals={signals}
+                        levels={levels}
+                        grouping={grouping}
+                        profiles={stockProfiles.profiles}
+                        onReclassify={stockProfiles.reclassify}
+                        dividends={
+                          dividends && tally
+                            ? { ...dividends, next: tally.nextBySymbol }
+                            : undefined
+                        }
+                      />
+                    )}
+                  </>
+                )}
+
+                {view === "trades" && (
+                  <>
+                    <p className="text-xs text-muted">
+                      Every buy and sell, in USD as recorded. Holdings and P/L are worked out from
+                      these.
+                    </p>
+                    <TradeForm
+                      key={editing?.id ?? `new-${selectedId ?? "all"}`}
+                      portfolios={portfolios}
+                      portfolioId={selectedId}
+                      editing={editing}
+                      suggestions={suggestions}
+                      quotes={state.quotes}
+                      onDone={stopEditing}
+                    />
+                    <TradeHistory
+                      trades={visibleTrades}
+                      portfolioNames={
+                        selectedId
+                          ? null
+                          : Object.fromEntries(
+                              portfolios.map((portfolio) => [portfolio.id, portfolio.name]),
+                            )
+                      }
+                      editingId={editing?.id ?? null}
+                      onEdit={setEditing}
+                    />
+                  </>
+                )}
+
+                {view === "calculator" && (
+                  <AverageCalculator
+                    positions={positions}
+                    quotes={state.quotes}
+                    display={display}
+                  />
                 )}
               </div>
-              {importing && (
-                <ImportHoldings
-                  portfolios={portfolios}
-                  portfolioId={selectedId}
-                  image={importing.image}
-                  onClose={() => setImporting(null)}
-                />
-              )}
-              {positions.length === 0 ? (
-                !importing && (
-                  <EmptyState
-                    title={<h3>Nothing held yet</h3>}
-                    hint="Record a buy below, or paste a screenshot of your broker's holdings (Ctrl+V)."
-                    inline
-                  />
-                )
-              ) : (
-                <HoldingsTable
-                  positions={positions}
-                  display={display}
-                  signals={signals}
-                  levels={levels}
-                />
-              )}
-            </section>
-
-            <AverageCalculator positions={positions} quotes={state.quotes} display={display} />
-
-            <section aria-labelledby="trades-heading" className="grid gap-3">
-              <h2 id="trades-heading" className={HEADING}>
-                Trades <span className="font-normal text-muted">· USD, as recorded</span>
-              </h2>
-              <TradeForm
-                key={editing?.id ?? `new-${selectedId ?? "all"}`}
-                portfolios={portfolios}
-                portfolioId={selectedId}
-                editing={editing}
-                suggestions={suggestions}
-                quotes={state.quotes}
-                onDone={stopEditing}
-              />
-              <TradeHistory
-                trades={visibleTrades}
-                portfolioNames={
-                  selectedId
-                    ? null
-                    : Object.fromEntries(
-                        portfolios.map((portfolio) => [portfolio.id, portfolio.name]),
-                      )
-                }
-                editingId={editing?.id ?? null}
-                onEdit={setEditing}
-              />
-            </section>
+            </div>
 
             <FxNote display={display} />
           </div>

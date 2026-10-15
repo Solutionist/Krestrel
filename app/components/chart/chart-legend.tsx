@@ -22,6 +22,8 @@ export interface LegendState {
   /** Close vs. previous candle's close, as a fraction; null for the first candle. */
   change: number | null;
   indicators: LegendIndicator[];
+  /** Set when the bars aren't plain candles, e.g. "Heikin Ashi"; the numbers stay real. */
+  barStyle: string | null;
 }
 
 /** Legend data written by the chart and read by the legend via `useSyncExternalStore`. */
@@ -69,6 +71,14 @@ export function ChartLegend({ store }: { store: LegendStore }) {
     // Faint panel backing so the readout stays legible over candles in both themes.
     <div className="pointer-events-none absolute top-2 left-3 z-10 space-y-0.5 rounded-lg bg-panel/80 px-2 py-1 text-[11px] leading-4 tabular-nums backdrop-blur-sm">
       <div className="flex flex-wrap gap-x-2.5 text-muted">
+        {state.barStyle && (
+          <span
+            className="rounded bg-accent/15 px-1 text-accent"
+            title="The bars are averaged; open, high, low, close and change are the real prices."
+          >
+            {state.barStyle}
+          </span>
+        )}
         <span>
           O <span className="text-text">{formatPrice(state.open)}</span>
         </span>

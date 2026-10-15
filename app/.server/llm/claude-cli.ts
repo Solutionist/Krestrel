@@ -2,12 +2,14 @@
 // Krestrel never sees, stores, or forwards Claude credentials: the CLI handles sign-in itself,
 // which is the use Anthropic's legal page explicitly allows (code.claude.com/docs/en/legal-and-compliance).
 import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Logger } from "pino";
 import * as z from "zod";
+
+import { PII_KINDS, type PiiKind, redactPii } from "~/lib/pii";
 
 import { parseConfig } from "../env-schema";
 import { type ResolvedCommand, resolveWindowsCommand } from "./resolve-command";
@@ -144,19 +146,46 @@ export interface ClaudeCliDeps {
   scratchDir: string;
 }
 
+/** Claude's own web research tools, enabled only when a request asks for web search. */
+const WEB_TOOLS = ["WebSearch", "WebFetch"];
+
+/** File extension for image bytes, from their magic number (PNG, JPEG, WebP; PNG otherwise). */
+function imageExtension(image: Uint8Array): string {
+  if (image[0] === 0xff && image[1] === 0xd8) return "jpg";
+  if (image[8] === 0x57 && image[9] === 0x45 && image[10] === 0x42 && image[11] === 0x50) {
+    return "webp";
+  }
+  return "png";
+}
+
+/**
+ * Claude Code tells the model its working directory, so it must not name the owner (ADR 0021).
+ * Windows' temp folder sits under C:\Users\<name>; the shared Public folder doesn't. macOS and
+ * Linux temp folders carry no user name.
+ */
+function defaultScratchDir(): string {
+  const base = process.platform === "win32" ? (process.env.PUBLIC ?? tmpdir()) : tmpdir();
+  return join(base, "krestrel-claude");
+}
+
+/**
+ * One Claude Code CLI shared by every feature: `forModel(alias)` gives a client for that model.
+ * All of them share one busy guard, so double clicks never spend the subscription twice.
+ */
 export function createClaudeCliClient(
   context: { env: Readonly<Record<string, string | undefined>>; logger: Logger },
   deps: Partial<ClaudeCliDeps> = {},
-): LlmClient {
+): (model?: string) => LlmClient {
   const config = parseConfig(ClaudeCliConfigSchema, context.env, "Claude CLI");
   const log = context.logger.child({ mod: "claude-cli" });
   const run = deps.run ?? runProcess;
-  const scratchDir = deps.scratchDir ?? join(tmpdir(), "krestrel-claude");
+  const scratchDir = deps.scratchDir ?? defaultScratchDir();
   let inFlight = false;
 
-  return {
+  return (chosenModel) => ({
     id: "claude-cli",
     displayName: "Claude (your subscription via Claude Code)",
+    capabilities: { webSearch: true },
 
     async generateStructured<T extends z.ZodType>(
       request: StructuredRequest<T>,
@@ -168,14 +197,40 @@ export function createClaudeCliClient(
           "Claude is already working on a request. Wait for it to finish.",
         );
       inFlight = true;
+      // Images go in as files in the empty scratch dir; Claude opens them with its Read tool.
+      const imageFiles = (request.images ?? []).map(
+        (image, index) => `image-${index + 1}.${imageExtension(image)}`,
+      );
       try {
         mkdirSync(scratchDir, { recursive: true });
-        // A per-request choice (the owner's model picker) wins over CLAUDE_MODEL.
-        const model = request.model ?? config.CLAUDE_MODEL;
+        for (const [index, name] of imageFiles.entries()) {
+          const image = request.images?.[index];
+          if (image) writeFileSync(join(scratchDir, name), image);
+        }
+        // A per-feature choice (the owner's model picker) wins over CLAUDE_MODEL.
+        const model = chosenModel ?? config.CLAUDE_MODEL;
         const timeoutMs = request.timeoutMs ?? config.CLAUDE_TIMEOUT_MS;
-        // Only the tools this request names: available (--tools) and pre-approved for headless
+        // Only the tools this request needs: available (--tools) and pre-approved for headless
         // use (--allowedTools). Without any, a pure text-in, JSON-out call.
-        const tools = (request.tools ?? []).join(",");
+        const tools = [
+          ...(request.webSearch ? WEB_TOOLS : []),
+          ...(imageFiles.length ? ["Read"] : []),
+        ].join(",");
+        // Last line of defence before anything leaves for Anthropic (ADR 0021): redact personal
+        // data in the prompt and system prompt; log only how many of each kind.
+        const guardedPrompt = redactPii(request.prompt);
+        const guardedSystem = redactPii(request.system);
+        const redacted: Partial<Record<PiiKind, number>> = {};
+        for (const kind of PII_KINDS) {
+          const count = (guardedPrompt.found[kind] ?? 0) + (guardedSystem.found[kind] ?? 0);
+          if (count > 0) redacted[kind] = count;
+        }
+        if (Object.keys(redacted).length > 0) {
+          log.warn({ redacted }, "personal data redacted from a Claude prompt");
+        }
+        const prompt = imageFiles.length
+          ? `Read the image file${imageFiles.length > 1 ? "s" : ""} ${imageFiles.map((name) => `./${name}`).join(", ")} in the current directory first.\n\n${guardedPrompt.text}`
+          : guardedPrompt.text;
         const args = [
           "-p",
           "--output-format",
@@ -183,8 +238,11 @@ export function createClaudeCliClient(
           "--json-schema",
           JSON.stringify(cliJsonSchema(request.schema)),
           "--system-prompt",
-          request.system,
+          guardedSystem.text,
           // No MCP servers, skills, or saved session beyond the requested built-in tools.
+          // --safe-mode also keeps the owner's ~/.claude/CLAUDE.md and other user customisations
+          // (which can name them) out of the model's context; sign-in still works (ADR 0021).
+          "--safe-mode",
           "--tools",
           tools,
           ...(tools ? ["--allowedTools", tools] : []),
@@ -200,7 +258,7 @@ export function createClaudeCliClient(
         );
         const started = Date.now();
         const result = await run(config.CLAUDE_CLI_PATH, args, {
-          stdin: request.prompt,
+          stdin: prompt,
           cwd: scratchDir,
           env,
           timeoutMs,
@@ -257,8 +315,9 @@ export function createClaudeCliClient(
         }
         return { data: parsed.data, model: Object.keys(envelope.modelUsage ?? {})[0] ?? null };
       } finally {
+        for (const name of imageFiles) rmSync(join(scratchDir, name), { force: true });
         inFlight = false;
       }
     },
-  };
+  });
 }

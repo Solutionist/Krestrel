@@ -1,10 +1,18 @@
 // Sector and type (growth / dividend / risky) per ticker, for grouping holdings (ADR 0019). The
-// owner's local Ollama model fills them in; the owner can correct any of them. Shared by server
+// owner's chosen AI fills them in (ADR 0020); the owner can correct any of them. Shared by server
 // and page.
 
 import * as z from "zod";
 
-import { IDEA_CATEGORIES, IDEA_CATEGORY_LABELS, type IdeaCategory, SECTOR_SHORT, SECTORS, type Sector } from "./ideas";
+import { AiChoiceSchema, DEFAULT_AI_OVERRIDES } from "./ai";
+import {
+  IDEA_CATEGORIES,
+  IDEA_CATEGORY_LABELS,
+  type IdeaCategory,
+  SECTOR_SHORT,
+  SECTORS,
+  type Sector,
+} from "./ideas";
 import { SymbolSchema } from "./market";
 import type { ValuedPosition } from "./portfolio";
 
@@ -34,6 +42,7 @@ export const StockProfileActionSchema = z.discriminatedUnion("intent", [
   z.object({
     intent: z.literal("classify"),
     symbols: z.array(SymbolSchema).min(1).max(MAX_CLASSIFY_SYMBOLS),
+    ai: AiChoiceSchema.default(DEFAULT_AI_OVERRIDES.grouping ?? { provider: "local", model: null }),
   }),
   z.object({
     intent: z.literal("set"),
@@ -47,6 +56,11 @@ export type StockProfileResult =
   | { ok: true; profiles: StockProfile[] }
   | { ok: false; error: { code: string; message: string } };
 
+/** Tickers to send to the model: no profile yet, or no type (the owner only set a sector). */
+export function needsClassifying(profile: StockProfile | undefined): boolean {
+  return profile === undefined || profile.style === null;
+}
+
 export interface HoldingGroup {
   /** Sector or style; null: not classified (or a fund, for sectors). */
   key: string | null;
@@ -59,9 +73,11 @@ export interface HoldingGroup {
 }
 
 /** Display name of a group key. */
-export function groupLabel(grouping: Exclude<HoldingsGrouping, "none">, key: string | null): string {
+function groupLabel(grouping: Exclude<HoldingsGrouping, "none">, key: string | null): string {
   if (key === null) return grouping === "sector" ? "Funds & unclassified" : "Unclassified";
-  return grouping === "sector" ? SECTOR_SHORT[key as Sector] : IDEA_CATEGORY_LABELS[key as IdeaCategory].name;
+  return grouping === "sector"
+    ? SECTOR_SHORT[key as Sector]
+    : IDEA_CATEGORY_LABELS[key as IdeaCategory].name;
 }
 
 /**
@@ -90,7 +106,5 @@ export function groupHoldings(
         weight: total > 0 ? marketValue / total : 0,
       };
     })
-    .sort((a, b) =>
-      a.key === null ? 1 : b.key === null ? -1 : b.marketValue - a.marketValue,
-    );
+    .sort((a, b) => (a.key === null ? 1 : b.key === null ? -1 : b.marketValue - a.marketValue));
 }

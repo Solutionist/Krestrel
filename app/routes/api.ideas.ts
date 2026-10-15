@@ -2,31 +2,22 @@ import {
   generateIdeas,
   holdingWeights,
   type IdeasBasis,
+  ideasQueries,
   openPositions,
 } from "~/.server/analysis/ideas";
-import { getLlm } from "~/.server/llm/instance";
-import { LlmError } from "~/.server/llm/types";
+import { aiFailureResponse, getAi, getWebSearch } from "~/.server/llm/instance";
+import { gatherResearch } from "~/.server/llm/research";
 import { logger } from "~/.server/logger";
 import { db } from "~/.server/market/db/instance";
 import { listTrades } from "~/.server/market/db/queries/portfolios";
 import { getMarketHub } from "~/.server/market/instance";
+import { crossSiteRejection } from "~/.server/same-origin";
 import { type Idea, IdeasRequestSchema, type IdeasResponse, type Sector } from "~/lib/ideas";
 
 import type { Route } from "./+types/api.ideas";
 
 /** Fewer verified ideas than this is not worth showing. */
 const MIN_VERIFIED_IDEAS = 3;
-
-const STATUS: Record<LlmError["code"], number> = {
-  disabled: 503,
-  not_installed: 503,
-  not_signed_in: 503,
-  busy: 429,
-  rate_limited: 429,
-  timeout: 504,
-  invalid_output: 502,
-  failed: 502,
-};
 
 function fail(status: number, code: string, message: string): Response {
   return Response.json({ ok: false, error: { code, message } } satisfies IdeasResponse, {
@@ -56,22 +47,35 @@ async function startingMix(
 }
 
 /**
- * POST /api/ideas { focus?, model? } → 5–10 stock ideas (growth / dividend / risky) researched by
- * Claude with web search, steered by the owner's mix. Only symbols and percent weights leave the
+ * POST /api/ideas { focus?, ai? } → 5–10 stock ideas (growth / dividend / risky) from the chosen
+ * AI, steered by the owner's mix. Claude researches with web search; a local model gets Tavily
+ * results (TAVILY_API_KEY) or only its own knowledge. Only symbols and percent weights leave the
  * server. Every ticker is checked against the provider's listing. Only called on an explicit click.
  */
 export async function action({ request }: Route.ActionArgs) {
+  const refused = crossSiteRejection(request);
+  if (refused) return refused;
   const body = IdeasRequestSchema.safeParse(await request.json().catch(() => null));
   if (!body.success) return fail(400, "invalid", "Invalid ideas request.");
-  const { focus, model } = body.data;
+  const { focus, ai } = body.data;
 
   try {
-    const llm = getLlm();
+    const llm = getAi(ai);
     const hub = getMarketHub();
     await hub.start(); // The watchlist is loaded on start.
     const watchlist = hub.snapshot().watchlist;
-    const { basis, holdings } = await startingMix(watchlist);
-    // Load the ticker listing while Claude works, so checking its picks is instant afterwards.
+    const now = Date.now();
+    const [{ basis, holdings }, research] = await Promise.all([
+      startingMix(watchlist),
+      // Tavily settings matter only to a model that can't browse; Claude never reads them.
+      gatherResearch(
+        llm,
+        llm.capabilities.webSearch ? null : getWebSearch(),
+        ideasQueries(focus, now),
+        logger,
+      ),
+    ]);
+    // Load the ticker listing while the model works, so checking its picks is instant afterwards.
     hub.warmAssets();
     const { ideas: answer, model: usedModel } = await generateIdeas(llm, {
       focus,
@@ -80,8 +84,8 @@ export async function action({ request }: Route.ActionArgs) {
         symbol: holding.symbol,
         weightPct: holding.weight * 100,
       })),
-      model,
-      now: Date.now(),
+      now,
+      research,
     });
 
     // Drop tickers the provider says aren't listed; keep ones it couldn't check right now
@@ -97,7 +101,7 @@ export async function action({ request }: Route.ActionArgs) {
       return fail(
         502,
         "invalid_output",
-        "Claude suggested too few stocks that are listed on NYSE or Nasdaq. Try again.",
+        "The AI suggested too few stocks that are listed on NYSE or Nasdaq. Try again.",
       );
     }
 
@@ -137,9 +141,12 @@ export async function action({ request }: Route.ActionArgs) {
       suggestedSectors: answer.suggestedSectors,
       ideas,
       generatedAt: new Date().toISOString(),
+      research: research.mode,
+      researchNote: research.note,
     } satisfies IdeasResponse);
   } catch (err) {
-    if (err instanceof LlmError) return fail(STATUS[err.code], err.code, err.message);
+    const failure = aiFailureResponse(err);
+    if (failure) return failure;
     logger.error({ err, focus }, "ideas failed");
     return fail(500, "failed", "The ideas failed unexpectedly. Check the server log.");
   }

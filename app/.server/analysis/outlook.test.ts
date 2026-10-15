@@ -4,8 +4,10 @@ import type * as z from "zod";
 import type { Analysis } from "~/lib/analysis";
 import type { Candle, NewsItem } from "~/lib/market";
 import type { Outlook } from "~/lib/outlook";
+import { redactPii } from "~/lib/pii";
 import type { TradePlan } from "~/lib/trade-plan";
 
+import { citationCheck } from "../llm/research";
 import type { LlmClient, StructuredRequest } from "../llm/types";
 import {
   buildOutlookPrompt,
@@ -16,6 +18,11 @@ import {
 } from "./outlook";
 
 const NOW = Date.parse("2026-10-14T18:00:00Z");
+/** A model that browsed the web itself may cite any real link. */
+const anyLink = () => true;
+/** A model that couldn't browse may cite only the links it was given. */
+const onlyGiven = (urls: string[]) =>
+  citationCheck({ mode: "none", results: [], note: null }, urls);
 
 const candles: Candle[] = Array.from({ length: 80 }, (_, i) => {
   const close = 80 + i / 2;
@@ -85,6 +92,7 @@ const input: OutlookInput = {
   plan,
   news,
   now: NOW,
+  research: { mode: "web", results: [], note: null },
 };
 
 function outlook(overrides: Partial<Outlook> = {}): Outlook {
@@ -118,6 +126,9 @@ const article = (url: string, date = "2026-10-10") => ({
 describe("buildOutlookPrompt", () => {
   const prompt = buildOutlookPrompt(input);
 
+  it("passes the Claude client's personal-data guard untouched", () => {
+    expect(redactPii(prompt)).toEqual({ text: prompt, found: {} });
+  });
   it("gives the levels, the local plan and the technical context", () => {
     expect(prompt).toContain("Last price: 119.50");
     expect(prompt).toContain("S1: support 112.50");
@@ -147,6 +158,39 @@ describe("buildOutlookPrompt", () => {
     );
     expect(prompt).toMatch(/never build or guess a URL/);
   });
+
+  it("hands a local model the Tavily results and tells it to cite only listed links", () => {
+    const local = buildOutlookPrompt({
+      ...input,
+      research: {
+        mode: "tavily",
+        results: [
+          {
+            title: "Apple target raised",
+            url: "https://news.example/apple",
+            excerpt: "Analysts lift targets.",
+            published: "2026-10-12",
+          },
+        ],
+        note: null,
+      },
+    });
+    expect(local).toContain("- 2026-10-12 · Apple target raised · https://news.example/apple");
+    expect(local).toContain("Analysts lift targets.");
+    expect(local).toMatch(/you cannot browse/);
+    expect(local).toMatch(/only as stated in the results above/);
+    expect(local).not.toMatch(/use web search/);
+  });
+
+  it("tells a model with no research that it has no analyst data", () => {
+    const bare = buildOutlookPrompt({
+      ...input,
+      research: { mode: "none", results: [], note: null },
+    });
+    expect(bare).not.toContain("Web search results");
+    expect(bare).not.toMatch(/use web search/);
+    expect(bare).toMatch(/no current analyst data, so use consensus "unknown"/);
+  });
 });
 
 describe("sanitizeOutlook", () => {
@@ -164,6 +208,7 @@ describe("sanitizeOutlook", () => {
         ],
       }),
       120,
+      anyLink,
     );
     expect(cleaned.news.map((item) => item.url)).toEqual([
       "https://example.com/b",
@@ -173,6 +218,30 @@ describe("sanitizeOutlook", () => {
       "https://example.com/f",
       "https://example.com/g",
     ]);
+  });
+
+  it("drops links a model that couldn't browse wasn't given, in any spelling of the URL", () => {
+    const cleaned = sanitizeOutlook(
+      outlook({
+        news: [
+          article("https://example.com/invented"),
+          article("HTTPS://Example.com/given"),
+          article("https://example.com/feed"),
+        ],
+      }),
+      120,
+      onlyGiven(["https://example.com/given", " https://EXAMPLE.com/feed "]),
+    );
+    expect(cleaned.news.map((item) => item.url)).toEqual([
+      "https://example.com/given",
+      "https://example.com/feed",
+    ]);
+    const nothingGiven = sanitizeOutlook(
+      outlook({ news: [article("https://example.com/a")] }),
+      120,
+      onlyGiven([]),
+    );
+    expect(nothingGiven.news).toEqual([]);
   });
 
   it("swaps a reversed buy zone and drops prices outside sane bands of the last price", () => {
@@ -188,6 +257,7 @@ describe("sanitizeOutlook", () => {
         },
       }),
       120,
+      anyLink,
     );
     expect(cleaned.plan).toMatchObject({
       buyLow: 110,
@@ -203,6 +273,7 @@ describe("sanitizeOutlook", () => {
         plan: { stance: "wait", buyLow: 50, buyHigh: 115, stop: 100, targets: [], rationale: "r" },
       }),
       120,
+      anyLink,
     );
     expect(halfZone.plan).toMatchObject({ buyLow: null, buyHigh: null, stop: 100 });
     const stopAbovePrice = sanitizeOutlook(
@@ -217,6 +288,7 @@ describe("sanitizeOutlook", () => {
         },
       }),
       120,
+      anyLink,
     );
     expect(stopAbovePrice.plan.stop).toBeNull();
     const stopTooDeep = sanitizeOutlook(
@@ -231,6 +303,7 @@ describe("sanitizeOutlook", () => {
         },
       }),
       120,
+      anyLink,
     );
     expect(stopTooDeep.plan.stop).toBeNull();
   });
@@ -248,6 +321,7 @@ describe("sanitizeOutlook", () => {
         },
       }),
       120,
+      anyLink,
     );
     expect(cleaned.plan.targets).toEqual([130]);
   });
@@ -266,6 +340,7 @@ describe("sanitizeOutlook", () => {
         },
       }),
       120,
+      anyLink,
     );
     expect(cleaned.analysts).toMatchObject({
       targetLow: null,
@@ -281,6 +356,7 @@ describe("sanitizeOutlook", () => {
     const cleaned = sanitizeOutlook(
       outlook({ sentiment: { overall: "neutral", summary: wordy }, risks: [wordy, "  "] }),
       120,
+      anyLink,
     );
     expect(cleaned.sentiment.summary.length).toBeLessThanOrEqual(200);
     expect(cleaned.sentiment.summary.endsWith("…")).toBe(true);
@@ -291,11 +367,12 @@ describe("sanitizeOutlook", () => {
 });
 
 describe("generateOutlook", () => {
-  function fakeLlm(data: Outlook) {
+  function fakeLlm(data: Outlook, webSearch = true) {
     const requests: StructuredRequest<z.ZodType>[] = [];
     const llm: LlmClient = {
-      id: "fake",
+      id: webSearch ? "claude-cli" : "ollama",
       displayName: "Fake",
+      capabilities: { webSearch },
       async generateStructured(request) {
         requests.push(request);
         return { data: request.schema.parse(data), model: "claude-test" };
@@ -304,22 +381,41 @@ describe("generateOutlook", () => {
     return { llm, requests };
   }
 
-  it("lets Claude search the web for longer than a plain call, with the picked model", async () => {
-    const { llm, requests } = fakeLlm(outlook());
-    const result = await generateOutlook(llm, { ...input, model: "opus" });
+  it("lets Claude search the web for longer than a plain call, keeping any real link", async () => {
+    const { llm, requests } = fakeLlm(
+      outlook({ news: [article("javascript:alert(1)"), article("https://found.example/ok")] }),
+    );
+    const result = await generateOutlook(llm, input);
     expect(result.model).toBe("claude-test");
     const [request] = requests;
-    expect(request?.tools).toEqual(["WebSearch", "WebFetch"]);
-    expect(request?.model).toBe("opus");
+    expect(request?.webSearch).toBe(true);
     expect(request?.timeoutMs).toBe(OUTLOOK_TIMEOUT_MS);
+    expect(result.outlook.news.map((item) => item.url)).toEqual(["https://found.example/ok"]);
   });
 
-  it("leaves the model to the backend for `default` and sanitises the answer", async () => {
+  it("keeps only feed and Tavily links from a model that couldn't browse", async () => {
     const { llm, requests } = fakeLlm(
-      outlook({ news: [article("javascript:alert(1)"), article("https://example.com/ok")] }),
+      outlook({
+        news: [
+          article("https://invented.example/story"),
+          article("https://example.com/newer"),
+          article("https://news.example/apple"),
+        ],
+      }),
+      false,
     );
-    const result = await generateOutlook(llm, { ...input, model: "default" });
-    expect(requests[0]?.model).toBeUndefined();
-    expect(result.outlook.news.map((item) => item.url)).toEqual(["https://example.com/ok"]);
+    const result = await generateOutlook(llm, {
+      ...input,
+      research: {
+        mode: "tavily",
+        results: [{ title: "t", url: "https://news.example/apple", excerpt: "e", published: null }],
+        note: null,
+      },
+    });
+    expect(requests[0]?.webSearch).toBe(false);
+    expect(result.outlook.news.map((item) => item.url)).toEqual([
+      "https://example.com/newer",
+      "https://news.example/apple",
+    ]);
   });
 });

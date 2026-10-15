@@ -1,5 +1,5 @@
 import { WarningCircleIcon } from "@phosphor-icons/react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 
 import { Button } from "~/components/ui/button";
@@ -32,12 +32,15 @@ export function PortfolioList({
   const result = create.data;
   const error = result && !result.ok ? result.error.message : null;
 
-  // Open the portfolio just created.
+  // Open the portfolio just created, once: `onSelect` changes with every URL change, and running
+  // this again would navigate to the current URL (reloading the page data) and drop a trade edit.
+  const opened = useRef<PortfolioActionResult | undefined>(undefined);
   useEffect(() => {
-    if (create.state === "idle" && result?.ok && result.portfolioId) {
-      setName("");
-      onSelect(result.portfolioId);
-    }
+    if (create.state !== "idle" || !result?.ok || !result.portfolioId) return;
+    if (opened.current === result) return;
+    opened.current = result;
+    setName("");
+    onSelect(result.portfolioId);
   }, [create.state, result, onSelect]);
 
   function submit(event: FormEvent<HTMLFormElement>) {

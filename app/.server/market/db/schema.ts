@@ -15,7 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Relative (not `~/`) because drizzle-kit loads this file without the tsconfig path alias.
-import type { IdeaCategory, Sector } from "../../../lib/ideas";
+import { type IdeaCategory, SECTORS, type Sector } from "../../../lib/ideas";
 import type { BarSource } from "../../../lib/market";
 
 // Prices: numeric(14,4) in Postgres, `number` in TypeScript (ADR 0008). Four decimals and
@@ -139,5 +139,10 @@ export const stockProfiles = pgTable(
   (t) => [
     check("stock_profiles_source_check", sql`${t.source} IN ('model', 'owner')`),
     check("stock_profiles_style_check", sql`${t.style} IN ('growth', 'dividend', 'risky')`),
+    // The 11 GICS sectors the app knows; anything else would have no group label.
+    check(
+      "stock_profiles_sector_check",
+      sql`${t.sector} IN (${sql.raw(SECTORS.map((sector) => `'${sector}'`).join(", "))})`,
+    ),
   ],
 );

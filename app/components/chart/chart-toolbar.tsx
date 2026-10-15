@@ -44,6 +44,18 @@ const INTERVAL_OPTIONS: readonly SegmentedOption<Timeframe>[] = TIMEFRAMES.map((
 /** Splits intraday intervals from calendar ones. */
 const INTERVAL_DIVIDERS: readonly Timeframe[] = ["1D"];
 
+export const BAR_STYLES = ["candles", "heikin-ashi"] as const;
+export type BarStyle = (typeof BAR_STYLES)[number];
+const BAR_STYLE_OPTIONS: readonly SegmentedOption<BarStyle>[] = [
+  { value: "candles", label: "Candles", title: "Candlesticks from the real prices" },
+  {
+    value: "heikin-ashi",
+    label: "Heikin Ashi",
+    title:
+      "Heikin Ashi: averaged bars that smooth out noise so trends stand out. Prices shown stay real.",
+  },
+];
+
 export const OVERLAYS = ["trades", "levels", "plan"] as const;
 export type Overlay = (typeof OVERLAYS)[number];
 const OVERLAY_LABELS: Record<Overlay, string> = { trades: "Buy/Sell", levels: "S/R", plan: "Plan" };
@@ -64,6 +76,8 @@ export function ChartToolbar({
   sidePanel,
   onTogglePanel,
   loading,
+  barStyle,
+  onBarStyle,
 }: {
   timeframe: Timeframe;
   onInterval: (timeframe: Timeframe) => void;
@@ -76,6 +90,8 @@ export function ChartToolbar({
   sidePanel: "outlook" | "insights" | "none";
   onTogglePanel: (panel: "outlook" | "insights") => void;
   loading: boolean;
+  barStyle: BarStyle;
+  onBarStyle: (style: BarStyle) => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2">
@@ -85,6 +101,13 @@ export function ChartToolbar({
         value={timeframe}
         onChange={onInterval}
         dividers={INTERVAL_DIVIDERS}
+      />
+
+      <Segmented
+        label="Bar style"
+        options={BAR_STYLE_OPTIONS}
+        value={barStyle}
+        onChange={onBarStyle}
       />
 
       <IndicatorMenu

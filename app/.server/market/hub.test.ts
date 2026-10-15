@@ -67,6 +67,7 @@ function fakeProvider(overrides: Partial<MarketDataProvider> = {}) {
       { symbol: "AMD", name: "Advanced Micro Devices, Inc.", exchange: "NASDAQ" },
     ],
     getNews: async (): Promise<NewsItem[]> => [],
+    getDividends: async () => [],
     ...overrides,
   };
   const live = () => {
@@ -272,6 +273,59 @@ describe("MarketHub news", () => {
       },
     });
     await expect(hubFor(provider).getNews("AAPL")).resolves.toEqual([]);
+  });
+});
+
+describe("MarketHub dividends", () => {
+  const hubAt = (provider: MarketDataProvider, clock: { now: number }) =>
+    new MarketHub({
+      provider,
+      db,
+      logger: pino({ level: "silent" }),
+      backfillDays: 1,
+      dailyHistoryYears: 1,
+      now: () => clock.now,
+    });
+  const ko = {
+    symbol: "KO",
+    exDate: "2026-09-15",
+    payDate: "2026-10-01",
+    amount: 0.53,
+    special: false,
+  };
+
+  it("asks only for symbols not cached, and asks again after 6 hours", async () => {
+    const getDividends = vi.fn<MarketDataProvider["getDividends"]>(async () => [ko]);
+    const { provider } = fakeProvider({ getDividends });
+    const clock = { now: NOW };
+    const hub = hubAt(provider, clock);
+
+    const first = await hub.getDividends(["KO", "NVDA"]);
+    // NVDA paid nothing: known, with no payments (not missing).
+    expect(Object.fromEntries(first)).toEqual({
+      KO: [{ exDate: "2026-09-15", payDate: "2026-10-01", amount: 0.53, special: false }],
+      NVDA: [],
+    });
+    // About 28 months back (two yearly cycles) and 4 months ahead, as New York dates.
+    expect(getDividends).toHaveBeenCalledWith(["KO", "NVDA"], "2024-05-31", "2027-02-11");
+
+    await hub.getDividends(["KO", "AAPL"]);
+    expect(getDividends).toHaveBeenLastCalledWith(["AAPL"], expect.any(String), expect.any(String));
+
+    clock.now = NOW + 6 * 60 * MINUTE + 1;
+    await hub.getDividends(["KO"]);
+    expect(getDividends).toHaveBeenLastCalledWith(["KO"], expect.any(String), expect.any(String));
+    expect(getDividends).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves symbols out (unknown) instead of reporting no dividend when the provider fails", async () => {
+    const { provider } = fakeProvider({
+      getDividends: async () => {
+        throw new Error("HTTP 500");
+      },
+    });
+    const result = await hubAt(provider, { now: NOW }).getDividends(["KO"]);
+    expect(result.has("KO")).toBe(false);
   });
 });
 

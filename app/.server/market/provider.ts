@@ -3,6 +3,7 @@
 // provider's folder may know upstream field names, URLs, or error codes.
 import type { Logger } from "pino";
 
+import type { DividendPayment } from "~/lib/dividends";
 import type {
   Asset,
   Bar,
@@ -64,6 +65,15 @@ export interface MarketDataProvider extends ProviderCapabilities {
   listAssets(): Promise<Asset[]>;
   /** Headlines mentioning `symbol` published since `since`, newest first, at most `limit`. */
   getNews(symbol: string, since: Date, limit: number): Promise<NewsItem[]>;
+  /**
+   * Cash dividends for `symbols` paid or announced around [startDay, endDay] (`YYYY-MM-DD`),
+   * oldest first (ADR 0022). Symbols that pay nothing simply don't appear.
+   */
+  getDividends(
+    symbols: readonly string[],
+    startDay: string,
+    endDay: string,
+  ): Promise<Array<DividendPayment & { symbol: string }>>;
 }
 
 export interface ProviderContext {

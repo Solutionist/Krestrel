@@ -4,6 +4,7 @@ import type * as z from "zod";
 import type { IdeasModelOutput } from "~/lib/ideas";
 import type { Trade } from "~/lib/portfolio";
 
+import { citationCheck } from "../llm/research";
 import type { LlmClient, StructuredRequest } from "../llm/types";
 import {
   buildIdeasPrompt,
@@ -15,6 +16,12 @@ import {
   sanitizeIdeas,
 } from "./ideas";
 
+/** A model that browsed the web itself may cite any real link. */
+const anyLink = () => true;
+/** A model that couldn't browse may cite only the links it was given. */
+const onlyGiven = (urls: string[]) =>
+  citationCheck({ mode: "none", results: [], note: null }, urls);
+
 const NOW = Date.parse("2026-10-14T18:00:00Z");
 
 const input: IdeasInput = {
@@ -25,6 +32,7 @@ const input: IdeasInput = {
     { symbol: "AAPL", weightPct: 37.655 },
   ],
   now: NOW,
+  research: { mode: "web", results: [], note: null },
 };
 
 type ModelIdea = IdeasModelOutput["ideas"][number];
@@ -118,6 +126,38 @@ describe("buildIdeasPrompt", () => {
     expect(empty).toContain("leave holdingSectors empty");
     expect(empty).not.toContain("Exclude stocks already held");
   });
+
+  it("gives a local model the Tavily results and limits its sources to them", () => {
+    const local = buildIdeasPrompt({
+      ...input,
+      research: {
+        mode: "tavily",
+        results: [
+          {
+            title: "Utility yields",
+            url: "https://r.example/u",
+            excerpt: "NEE 3%",
+            published: null,
+          },
+        ],
+        note: null,
+      },
+    });
+    expect(local).toContain("- undated · Utility yields · https://r.example/u");
+    expect(local).toMatch(/you cannot browse further/);
+    expect(local).toMatch(/only from the results above/);
+    expect(local).not.toMatch(/use web search for current facts/);
+  });
+
+  it("asks a model without research for no sources", () => {
+    const bare = buildIdeasPrompt({
+      ...input,
+      research: { mode: "none", results: [], note: null },
+    });
+    expect(bare).toMatch(/you have no web access/);
+    expect(bare).toMatch(/leave sources empty/);
+    expect(bare).not.toContain("Web search results");
+  });
 });
 
 describe("sanitizeIdeas", () => {
@@ -133,13 +173,14 @@ describe("sanitizeIdeas", () => {
           idea("DUK"),
         ],
       }),
-      { held: ["NVDA", "AAPL"], focus: "Utilities" },
+      { held: ["NVDA", "AAPL"], focus: "Utilities", isCitable: anyLink },
     );
     expect(cleaned.ideas.map((entry) => entry.symbol)).toEqual(["NEE", "DUK"]);
     expect(
       sanitizeIdeas(output({ ideas: [idea("brk.b", { sector: "Financials" })] }), {
         held: [],
         focus: "diversify",
+        isCitable: anyLink,
       }).ideas.map((entry) => entry.symbol),
     ).toEqual(["BRK.B"]);
   });
@@ -159,12 +200,35 @@ describe("sanitizeIdeas", () => {
           }),
         ],
       }),
-      { held: [], focus: "diversify" },
+      { held: [], focus: "diversify", isCitable: anyLink },
     ).ideas;
     expect(cleaned?.sources).toEqual([
       { title: "example.com", url: "https://example.com/a" },
       { title: "b", url: "http://example.com/b" },
     ]);
+  });
+
+  it("drops sources a model that couldn't browse wasn't given", () => {
+    const [cleaned] = sanitizeIdeas(
+      output({
+        ideas: [
+          idea("NEE", {
+            sources: [
+              { title: "made up", url: "https://invented.example/nee" },
+              { title: "given", url: "HTTPS://R.example/u" },
+            ],
+          }),
+        ],
+      }),
+      { held: [], focus: "diversify", isCitable: onlyGiven(["https://r.example/u"]) },
+    ).ideas;
+    expect(cleaned?.sources).toEqual([{ title: "given", url: "https://r.example/u" }]);
+    const [bare] = sanitizeIdeas(output({ ideas: [idea("NEE")] }), {
+      held: [],
+      focus: "diversify",
+      isCitable: onlyGiven([]),
+    }).ideas;
+    expect(bare?.sources).toEqual([]);
   });
 
   it("clamps texts and metrics at word boundaries and caps the list at 10", () => {
@@ -182,7 +246,7 @@ describe("sanitizeIdeas", () => {
           }),
         ),
       }),
-      { held: [], focus: "diversify" },
+      { held: [], focus: "diversify", isCitable: anyLink },
     );
     expect(cleaned.ideas).toHaveLength(10);
     expect(cleaned.summary.length).toBeLessThanOrEqual(240);
@@ -201,37 +265,65 @@ describe("sanitizeIdeas", () => {
           { symbol: "TSLA", sector: "Consumer Discretionary" },
         ],
       }),
-      { held: ["NVDA", "AAPL"], focus: "diversify" },
+      { held: ["NVDA", "AAPL"], focus: "diversify", isCitable: anyLink },
     );
     expect(cleaned.holdingSectors).toEqual([{ symbol: "NVDA", sector: "Information Technology" }]);
   });
 });
 
 describe("generateIdeas", () => {
-  it("runs Claude with web tools, the chosen model and the long timeout, then sanitises", async () => {
+  function fakeLlm(data: IdeasModelOutput, webSearch: boolean) {
     const requests: StructuredRequest<z.ZodType>[] = [];
     const llm: LlmClient = {
-      id: "fake",
+      id: webSearch ? "claude-cli" : "ollama",
       displayName: "Fake",
+      capabilities: { webSearch },
       async generateStructured<T extends z.ZodType>(request: StructuredRequest<T>) {
         requests.push(request);
-        return {
-          data: request.schema.parse(output({ ideas: [idea("NVDA"), ...output().ideas] })),
-          model: "claude-sonnet",
-        };
+        return { data: request.schema.parse(data), model: "claude-sonnet" };
       },
     };
+    return { llm, requests };
+  }
 
-    const result = await generateIdeas(llm, { ...input, model: "sonnet" });
-    expect(requests[0]).toMatchObject({
-      model: "sonnet",
-      tools: ["WebSearch", "WebFetch"],
-      timeoutMs: IDEAS_TIMEOUT_MS,
-    });
+  it("lets Claude search the web with the long timeout, then sanitises", async () => {
+    const { llm, requests } = fakeLlm(output({ ideas: [idea("NVDA"), ...output().ideas] }), true);
+    const result = await generateIdeas(llm, input);
+    expect(requests[0]).toMatchObject({ webSearch: true, timeoutMs: IDEAS_TIMEOUT_MS });
     expect(result.model).toBe("claude-sonnet");
     expect(result.ideas.ideas.map((entry) => entry.symbol)).not.toContain("NVDA");
+    // A browsing model may cite what it found.
+    expect(result.ideas.ideas[0]?.sources).toEqual([
+      { title: "Q2 results", url: "https://example.com/q2" },
+    ]);
+  });
 
-    await generateIdeas(llm, { ...input, model: "default" });
-    expect(requests[1]?.model).toBeUndefined();
+  it("keeps only Tavily links from a model that couldn't browse", async () => {
+    const { llm, requests } = fakeLlm(
+      output({
+        ideas: [
+          idea("NEE", {
+            sources: [
+              { title: "invented", url: "https://example.com/q2" },
+              { title: "found", url: "https://r.example/u" },
+            ],
+          }),
+          ...output().ideas.slice(1),
+        ],
+      }),
+      false,
+    );
+    const result = await generateIdeas(llm, {
+      ...input,
+      research: {
+        mode: "tavily",
+        results: [{ title: "t", url: "https://r.example/u", excerpt: "e", published: null }],
+        note: null,
+      },
+    });
+    expect(requests[0]?.webSearch).toBe(false);
+    expect(result.ideas.ideas[0]?.sources).toEqual([
+      { title: "found", url: "https://r.example/u" },
+    ]);
   });
 });

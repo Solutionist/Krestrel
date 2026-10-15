@@ -14,6 +14,7 @@ import { type ThemePreference, themePreference } from "~/hooks/use-theme";
 import { BASE_CURRENCY, currencyName } from "~/lib/currency";
 import type { ConnectionText, MarketText } from "~/lib/status-text";
 
+import { AiSettings } from "./ai/ai-settings";
 import { Segmented } from "./ui/segmented";
 
 const TONE_DOT: Record<ConnectionText["tone"], string> = {
@@ -90,6 +91,8 @@ export function TopBar({
       <span className="ml-auto hidden text-xs text-muted xl:inline">{dataLabel}</span>
 
       <CurrencySelect />
+
+      <AiSettings />
 
       <Segmented label="Theme" options={THEME_OPTIONS} value={theme} onChange={setTheme} />
 

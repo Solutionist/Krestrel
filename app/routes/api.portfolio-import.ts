@@ -1,9 +1,8 @@
-import { ConfigError } from "~/.server/env-schema";
-import { logger } from "~/.server/logger";
+import { aiFailureResponse, getAi } from "~/.server/llm/instance";
 import { getMarketHub } from "~/.server/market/instance";
-import { OLLAMA_ERROR_STATUS, OllamaError } from "~/.server/ollama";
 import { readHoldingsFromImage, type ScreenshotReading } from "~/.server/portfolio-import/vision";
 import { crossSiteRejection } from "~/.server/same-origin";
+import { type AiChoice, AiChoiceSchema, DEFAULT_AI_OVERRIDES } from "~/lib/ai";
 import {
   type HoldingsReadResult,
   IMPORT_IMAGE_TYPES,
@@ -20,11 +19,25 @@ function fail(status: number, code: string, message: string): Response {
 
 const TOO_LARGE = "That image is too large. Crop it to your holdings and try again.";
 
+/** The `ai` form field (JSON); without one the screenshot stays on this computer. */
+function aiChoice(raw: FormDataEntryValue | null | undefined): AiChoice | null {
+  const fallback = DEFAULT_AI_OVERRIDES.import ?? { provider: "local", model: null };
+  if (typeof raw !== "string") return fallback;
+  try {
+    const parsed = AiChoiceSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * POST /api/portfolio-import (multipart, field `image`) → holdings read from a broker screenshot
- * by the owner's local vision model, for review; nothing is saved here (ADR 0018). Only the
- * tickers it read go to the market data provider's listing check, never the image. Requests from
- * other websites are refused, and oversized uploads are refused before they are read.
+ * POST /api/portfolio-import (multipart: `image`, `ai` = JSON AI choice, `masked`) → holdings read
+ * from a broker screenshot by the chosen AI, for review; nothing is saved here (ADR 0018, 0020). A
+ * local model keeps the image on this machine. Claude only gets a copy the page masked on this
+ * computer and the owner approved (`masked=1`, ADR 0021); anything else is refused. Only the
+ * tickers read go to the market data provider's listing check. Requests from other websites are
+ * refused, and oversized uploads are refused before they are read.
  */
 export async function action({ request }: Route.ActionArgs) {
   const refused = crossSiteRejection(request);
@@ -44,17 +57,24 @@ export async function action({ request }: Route.ActionArgs) {
     return fail(415, "unsupported", "Use a PNG, JPEG or WebP image.");
   }
 
+  const ai = aiChoice(form?.get("ai"));
+  if (!ai) return fail(400, "invalid", "Unknown AI model choice.");
+  // Guard against any path that skips the on-device mask; the page always sets it after masking.
+  if (ai.provider === "claude" && form?.get("masked") !== "1") {
+    return fail(
+      400,
+      "unmasked",
+      "Screenshots go to Claude only after personal details are hidden on this computer. Import again from the portfolio page.",
+    );
+  }
+
+  const llm = getAi(ai);
   let reading: ScreenshotReading;
   try {
-    reading = await readHoldingsFromImage(new Uint8Array(await image.arrayBuffer()), {
-      env: process.env,
-      logger,
-    });
+    reading = await readHoldingsFromImage(llm, new Uint8Array(await image.arrayBuffer()));
   } catch (err) {
-    if (err instanceof OllamaError) {
-      return fail(OLLAMA_ERROR_STATUS[err.code], err.code, err.message);
-    }
-    if (err instanceof ConfigError) return fail(503, "config", err.message);
+    const failure = aiFailureResponse(err);
+    if (failure) return failure;
     throw err;
   }
 
@@ -86,5 +106,10 @@ export async function action({ request }: Route.ActionArgs) {
       : farAbove.length > 0
         ? `The average cost of ${farAbove.join(", ")} is far above today's price. If your app shows costs in another currency (such as ฿), convert them to USD before importing.`
         : undefined;
-  return Response.json({ ok: true, holdings, warning } satisfies HoldingsReadResult);
+  return Response.json({
+    ok: true,
+    holdings,
+    readBy: llm.displayName,
+    warning,
+  } satisfies HoldingsReadResult);
 }

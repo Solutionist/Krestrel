@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router";
 import { getMarketHub } from "~/.server/market/instance";
 import { AppShell } from "~/components/app-shell";
 import { PriceChart } from "~/components/chart/price-chart";
+import { DividendSummary } from "~/components/dividend-text";
 import { RsiSignalBadge } from "~/components/rsi-signal-badge";
 import { TopBar } from "~/components/top-bar";
 import { Button } from "~/components/ui/button";
@@ -11,6 +12,7 @@ import { CARD } from "~/components/ui/styles";
 import { Watchlist } from "~/components/watchlist/watchlist";
 import { DIRECTION_GLYPH } from "~/components/watchlist/watchlist-row";
 import { useCurrency } from "~/hooks/use-currency";
+import { useDividends } from "~/hooks/use-dividends";
 import { useMarketStream } from "~/hooks/use-market-stream";
 import { useNow } from "~/hooks/use-now";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
@@ -60,6 +62,9 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   const selected =
     requested && state.watchlist.includes(requested) ? requested : (state.watchlist[0] ?? null);
   const quote = selected ? state.quotes[selected] : undefined;
+  // One request for the whole watchlist, so switching symbols shows the line at once.
+  const dividends = useDividends(state.watchlist);
+  const dividend = selected ? dividends?.bySymbol[selected] : undefined;
   const change = quote ? priceChange(quote) : null;
   const market = describeMarket(state.clock, timeZone, now);
   const connection = describeConnection(state.link, state.status, now);
@@ -151,6 +156,15 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               onLive={onLive}
               historyVersion={state.historyVersion[selected] ?? 0}
             />
+            {dividends && dividend && (
+              <div className="border-t border-rule/60 px-5 py-2.5">
+                <DividendSummary
+                  info={dividend}
+                  today={dividends.today}
+                  price={quote?.lastPrice ?? null}
+                />
+              </div>
+            )}
           </>
         ) : (
           <div className="m-auto flex max-w-sm flex-col items-center p-8 text-center">

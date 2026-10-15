@@ -11,6 +11,7 @@ import {
 import {
   CandlestickSeries,
   ColorType,
+  type CreatePriceLineOptions,
   CrosshairMode,
   createChart,
   createSeriesMarkers,
@@ -40,6 +41,7 @@ import {
 } from "react";
 import * as z from "zod";
 import { createStoredValue } from "~/hooks/stored-value";
+import { useAiChoice } from "~/hooks/use-ai";
 import type { LiveListener } from "~/hooks/use-market-stream";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
 import { type Analysis, analyzeChart, type Trade } from "~/lib/analysis";
@@ -57,6 +59,7 @@ import {
 import { analysisWindow, INTERVAL_RANGE, rangeStart } from "~/lib/chart-ranges";
 import { captureWindow, windowToLogical } from "~/lib/chart-view";
 import { formatChange, formatPercentChange, formatPrice } from "~/lib/format";
+import { heikinAshi, type Ohlc, syncLastHeikinAshi } from "~/lib/heikin-ashi";
 import {
   bollinger,
   ema,
@@ -75,9 +78,9 @@ import { buildTradePlan, type TradePlan } from "~/lib/trade-plan";
 import { IconButton, ToggleChip } from "../ui/button";
 import { ChartLegend, createLegendStore, type LegendIndicator } from "./chart-legend";
 import { type ChartTheme, readChartTheme } from "./chart-theme";
-import { ChartToolbar, OVERLAYS, type Overlay } from "./chart-toolbar";
+import { BAR_STYLES, type BarStyle, ChartToolbar, OVERLAYS, type Overlay } from "./chart-toolbar";
 import { InsightsPanel } from "./insights-panel";
-import { claudeModel, OutlookPanel, type OutlookState } from "./outlook-panel";
+import { OutlookPanel, type OutlookState } from "./outlook-panel";
 import { createRsiPane, type RsiPane } from "./rsi-pane";
 import { usePersistedSet } from "./use-persisted-set";
 
@@ -195,7 +198,13 @@ export function PriceChart({
   );
   const [overlays, toggleOverlay] = usePersistedSet<Overlay>(OVERLAY_STORAGE_KEY, OVERLAYS);
   const [sidePanel, setSidePanel] = sidePanelSetting.use();
-  const [model] = claudeModel.use();
+  const [barStyle, setBarStyle] = barStyleSetting.use();
+  const barStyleRef = useRef(barStyle);
+  /** Heikin Ashi bars for `dataRef` (empty for candles); live ticks recompute only the last. */
+  const haBarsRef = useRef<Ohlc[]>([]);
+  /** Heikin Ashi only: the real last price on the axis, since the bars' close is an average. */
+  const realPriceRef = useRef<IPriceLine | null>(null);
+  const { choice: outlookAi } = useAiChoice("outlook");
   const togglePanel = (panel: Exclude<SidePanel, "none">) =>
     setSidePanel(sidePanel === panel ? "none" : panel);
   const [analysis, setAnalysis] = useState<{
@@ -273,10 +282,48 @@ export function PriceChart({
         volume: candle.volume,
         change: previous ? candle.close / previous.close - 1 : null,
         indicators: rows,
+        barStyle: barStyleRef.current === "heikin-ashi" ? "Heikin Ashi" : null,
       });
     },
     [legend, indicatorColors],
   );
+
+  /**
+   * Draws the bars in the chosen style from the real candles: all of them (`full`) or only the
+   * last, live one. Heikin Ashi hides the series' own last-value label (an averaged close) and
+   * marks the real last price instead.
+   */
+  const drawBars = useCallback((full: boolean) => {
+    const parts = chartRef.current;
+    if (!parts) return;
+    const { candles, theme } = parts;
+    const data = dataRef.current;
+    const ha = barStyleRef.current === "heikin-ashi";
+    if (full) {
+      candles.applyOptions({ lastValueVisible: !ha, priceLineVisible: !ha });
+      haBarsRef.current = ha ? heikinAshi(data) : [];
+      candles.setData((ha ? haBarsRef.current : data).map(toBar));
+    } else {
+      const bar = ha ? syncLastHeikinAshi(haBarsRef.current, data) : data.at(-1);
+      if (bar) candles.update(toBar(bar));
+    }
+    const last = data.at(-1);
+    if (!ha || !last) {
+      if (realPriceRef.current) candles.removePriceLine(realPriceRef.current);
+      realPriceRef.current = null;
+      return;
+    }
+    const line: CreatePriceLineOptions = {
+      price: last.close,
+      color: last.close >= last.open ? theme.rise : theme.fall,
+      lineStyle: LineStyle.Dotted,
+      lineWidth: 1,
+      axisLabelVisible: true,
+      title: "",
+    };
+    if (realPriceRef.current) realPriceRef.current.applyOptions(line);
+    else realPriceRef.current = candles.createPriceLine(line);
+  }, []);
 
   // ── Chart creation (once) ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -370,6 +417,7 @@ export function PriceChart({
     return () => {
       chart.unsubscribeCrosshairMove(onCrosshair);
       chartRef.current = null;
+      realPriceRef.current = null;
       markersRef.current = null;
       levelLinesRef.current = [];
       planLinesRef.current = [];
@@ -801,18 +849,11 @@ export function PriceChart({
   useEffect(() => {
     const parts = chartRef.current;
     if (!parts) return;
-    const { chart, candles, volume, theme } = parts;
+    const { chart, volume, theme } = parts;
     // Daily+ candles have no meaningful clock time on the axis.
     chart.applyOptions({ timeScale: { timeVisible: !isCalendarTimeframe(timeframe) } });
     const volumeColor = (candle: Candle) =>
       candle.close >= candle.open ? theme.riseVolume : theme.fallVolume;
-    const toBar = (c: Candle) => ({
-      time: c.time as UTCTimestamp,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    });
     const toVolume = (c: Candle) => ({
       time: c.time as UTCTimestamp,
       value: c.volume,
@@ -829,14 +870,14 @@ export function PriceChart({
     const abort = new AbortController();
 
     const drawAll = () => {
-      candles.setData(dataRef.current.map(toBar));
+      drawBars(true);
       volume.setData(dataRef.current.map(toVolume));
       renderIndicators(true);
       renderAnalysis();
       updateLegend();
     };
     const apply = (candle: Candle) => {
-      candles.update(toBar(candle));
+      drawBars(false);
       volume.update(toVolume(candle));
       renderIndicators(false);
       updateLegend();
@@ -889,10 +930,12 @@ export function PriceChart({
       if (!first || loadingOlder || olderExhausted) return;
       loadingOlder = true;
       try {
-        const older = await fetchCandles(
+        const fetched = await fetchCandles(
           `&to=${encodeURIComponent(new Date(first.time * 1000).toISOString())}`,
         );
         if (abort.signal.aborted) return;
+        // The chart needs strictly ascending times: never prepend the first candle again.
+        const older = fetched.filter((candle) => candle.time < first.time);
         if (older.length === 0) {
           olderExhausted = true;
           return;
@@ -972,7 +1015,15 @@ export function PriceChart({
     renderIndicators,
     renderAnalysis,
     updateLegend,
+    drawBars,
   ]);
+
+  // Switching bar style redraws the bars from the candles already loaded (no refetch).
+  useEffect(() => {
+    barStyleRef.current = barStyle;
+    drawBars(true);
+    updateLegend();
+  }, [barStyle, drawBars, updateLegend]);
 
   // An outlook belongs to one symbol + interval.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset trigger only.
@@ -981,16 +1032,17 @@ export function PriceChart({
     setOutlook({ kind: "idle" });
   }, [symbol, timeframe]);
 
-  // ── AI outlook by Claude (ADR 0016) ──────────────────────────────────────────────────────────
+  // ── AI outlook by the chosen AI (ADR 0016, 0020) ─────────────────────────────────────────────
   async function getOutlook() {
-    if (localStorage.getItem(CLAUDE_CONSENT_KEY) !== "yes") {
+    // Only Claude sends the chart off this computer; local models need no consent.
+    if (outlookAi.provider === "claude" && localStorage.getItem(CLAUDE_CONSENT_KEY) !== "yes") {
       const ok = window.confirm(
         `AI outlook sends the ticker (${symbol}), this chart's ${timeframe} prices and recent headlines (no keys or account data) to Anthropic through your own Claude Code CLI and Claude subscription. Claude also searches the web for news and analyst ratings. Continue?`,
       );
       if (!ok) return;
       localStorage.setItem(CLAUDE_CONSENT_KEY, "yes");
     }
-    // The candles Insights analyses, so Claude's levels and the local plan agree.
+    // The candles Insights analyses, so the AI's levels and the local plan agree.
     const candles = analysisWindow(dataRef.current, timeframe);
     renderAnalysis();
     setSidePanel("outlook");
@@ -1005,7 +1057,7 @@ export function PriceChart({
       const response = await fetch(`/api/outlook/${encodeURIComponent(symbol)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ timeframe, candles, model }),
+        body: JSON.stringify({ timeframe, candles, ai: outlookAi }),
       });
       const parsed = OutlookResponseSchema.safeParse(await response.json());
       next = !parsed.success
@@ -1034,6 +1086,8 @@ export function PriceChart({
         sidePanel={sidePanel}
         onTogglePanel={togglePanel}
         loading={load.kind === "loading"}
+        barStyle={barStyle}
+        onBarStyle={setBarStyle}
       />
       <div className="flex min-h-0 flex-1">
         <section
@@ -1188,6 +1242,24 @@ const sidePanelSetting = createStoredValue<SidePanel>(
   (raw) => SIDE_PANELS.find((panel) => panel === raw) ?? null,
   (panel) => panel,
 );
+
+/** Candles or Heikin Ashi bars (TradingView's "bar style"), remembered across sessions. */
+const barStyleSetting = createStoredValue<BarStyle>(
+  "krestrel.barStyle",
+  "candles",
+  (raw) => BAR_STYLES.find((style) => style === raw) ?? null,
+  (style) => style,
+);
+
+function toBar(bar: Ohlc) {
+  return {
+    time: bar.time as UTCTimestamp,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+  };
+}
 
 /** Floating readout pinned bottom-centre over the chart (select hint, range readout). */
 const FLOATING_NOTE =

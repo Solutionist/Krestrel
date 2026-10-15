@@ -1,5 +1,5 @@
-// Holdings import from a broker screenshot (ADR 0018). The image is read by an open vision model
-// on the owner's own Ollama; nothing is sent anywhere else.
+// Holdings import from a broker screenshot (ADR 0018, 0020). The owner's chosen AI reads it: a
+// local vision model on their own Ollama (stays on this machine) or Claude (sent to Anthropic).
 
 /** One holding read from a screenshot. `null`: not found in the image; the owner fills it in. */
 export interface ImportedHolding {
@@ -9,9 +9,12 @@ export interface ImportedHolding {
   averageCost: number | null;
 }
 
-/** POST /api/portfolio-import result. `warning`: read, but something needs the owner's eye. */
+/**
+ * POST /api/portfolio-import result. `warning`: read, but something needs the owner's eye.
+ * `readBy`: which AI read it, for the review.
+ */
 export type HoldingsReadResult =
-  | { ok: true; holdings: ImportedHolding[]; warning?: string }
+  | { ok: true; holdings: ImportedHolding[]; readBy: string; warning?: string }
   | { ok: false; error: { code: string; message: string } };
 
 /** Upload limit for one screenshot (a 4K PNG is ~5–10 MB). */

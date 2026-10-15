@@ -1,15 +1,15 @@
-// Reads holdings from a broker screenshot with the owner's local vision model (ADR 0018). The
-// answer is validated here and reviewed by the owner before anything is saved; the image goes
-// only to Ollama on this machine.
+// Reads holdings from a broker screenshot with the owner's chosen AI (ADR 0018, 0020): a local
+// vision model on Ollama (the image stays on this machine), or Claude (the image goes to
+// Anthropic). The answer is validated here and reviewed by the owner before anything is saved.
 
 import * as z from "zod";
 
 import type { ImportedHolding } from "~/lib/holdings-import";
 import { SymbolSchema } from "~/lib/market";
 
-import { type OllamaContext, ollamaStructured } from "../ollama";
+import type { LlmClient } from "../llm/types";
 
-/** First use loads the model into memory; CPU-only machines can take minutes per screenshot. */
+/** First use loads a local model into memory; CPU-only machines can take minutes per screenshot. */
 const TIMEOUT_MS = 300_000;
 
 /** What the model must return (Ollama turns this into a grammar the output has to follow). */
@@ -81,22 +81,18 @@ export function cleanHoldings(raw: z.output<typeof ReadingSchema>["holdings"]): 
   return [...bySymbol.values()].map((entry) => entry.holding);
 }
 
-/** Sends the screenshot to the local model and returns what it read. Throws OllamaError. */
+/** Sends the screenshot to `llm` and returns what it read. Throws LlmError. */
 export async function readHoldingsFromImage(
+  llm: LlmClient,
   image: Uint8Array,
-  context: OllamaContext,
 ): Promise<ScreenshotReading> {
-  const reading = await ollamaStructured(
-    {
-      feature: "Screenshot import",
-      system: SYSTEM,
-      prompt: PROMPT,
-      images: [image],
-      schema: ReadingSchema,
-      timeoutMs: TIMEOUT_MS,
-    },
-    context,
-  );
+  const { data: reading } = await llm.generateStructured({
+    system: SYSTEM,
+    prompt: PROMPT,
+    images: [image],
+    schema: ReadingSchema,
+    timeoutMs: TIMEOUT_MS,
+  });
   const mark = reading.currency?.trim() ?? "";
   return {
     holdings: cleanHoldings(reading.holdings),

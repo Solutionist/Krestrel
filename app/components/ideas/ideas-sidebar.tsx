@@ -1,16 +1,16 @@
 import { CheckIcon, LightbulbIcon } from "@phosphor-icons/react";
+import { useFeatureModel } from "~/hooks/use-ai";
 import { type Focus, SECTOR_SHORT, SECTORS } from "~/lib/ideas";
-import { CLAUDE_MODEL_LABELS, CLAUDE_MODELS } from "~/lib/outlook";
 
-import { claudeModel } from "../chart/outlook-panel";
+import { FeatureModelPicker } from "../ai/ai-model-picker";
 import { Button } from "../ui/button";
-import { CARD, FIELD, HEADING, LABEL } from "../ui/styles";
+import { CARD, HEADING, LABEL } from "../ui/styles";
 import { SECTOR_COLORS } from "./sector-mix";
 
 const OPTION =
   "flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors duration-150 has-checked:bg-accent/10 has-checked:text-text has-focus-visible:outline-2 has-focus-visible:outline-accent/75 not-has-checked:text-muted not-has-checked:hover:bg-subtle not-has-checked:hover:text-text";
 
-/** Sidebar: what to look for (diversify or one sector), which Claude model, and the button. */
+/** Sidebar: what to look for (diversify or one sector), which AI model, and the button. */
 export function IdeasSidebar({
   focus,
   onFocus,
@@ -25,8 +25,7 @@ export function IdeasSidebar({
   hasResult: boolean;
   onFind: () => void;
 }) {
-  const [model, setModel] = claudeModel.use();
-  const modelName = CLAUDE_MODEL_LABELS[model].name;
+  const { choice, name: modelName } = useFeatureModel("ideas");
 
   return (
     <aside aria-label="Find ideas" className={`${CARD} flex min-h-0 flex-col`}>
@@ -74,38 +73,31 @@ export function IdeasSidebar({
       </fieldset>
 
       <div className="space-y-3 border-t border-rule/60 p-4">
-        <label className="grid gap-1.5">
+        <div className="grid gap-1.5">
           <span className={LABEL}>Model</span>
-          <select
-            value={model}
-            onChange={(event) => {
-              const next = CLAUDE_MODELS.find((option) => option === event.target.value);
-              if (next) setModel(next);
-            }}
-            disabled={loading}
-            className={`${FIELD} h-9 cursor-pointer`}
-          >
-            {CLAUDE_MODELS.map((option) => (
-              <option key={option} value={option}>
-                {CLAUDE_MODEL_LABELS[option].name} · {CLAUDE_MODEL_LABELS[option].hint}
-              </option>
-            ))}
-          </select>
-        </label>
+          <FeatureModelPicker feature="ideas" label="Stock ideas model" disabled={loading} />
+        </div>
         <Button
           variant="primary"
           size="md"
           className="w-full"
           onClick={onFind}
           disabled={loading}
-          title="Sends the tickers you hold and their share of your portfolio to Anthropic via your Claude Code CLI."
+          title={
+            choice.provider === "claude"
+              ? "Sends the tickers you hold and their share of your portfolio to Anthropic via your Claude Code CLI."
+              : "Runs on this computer. With TAVILY_API_KEY set, Krestrel first searches the web (no holdings are sent)."
+          }
         >
           <LightbulbIcon aria-hidden size={16} />
           <span className={loading ? "animate-pulse" : ""}>
             {loading ? `Searching… (${modelName})` : hasResult ? "Refresh ideas" : "Find ideas"}
           </span>
         </Button>
-        <p className="text-xs text-muted">Takes 1–3 minutes. Not financial advice.</p>
+        <p className="text-xs text-muted">
+          {choice.provider === "claude" ? "Takes 1–3 minutes." : "Runs on this computer."} Not
+          financial advice.
+        </p>
       </div>
     </aside>
   );

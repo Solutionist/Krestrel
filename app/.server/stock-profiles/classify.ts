@@ -1,12 +1,13 @@
-// Sector and type per ticker from the owner's local model (ADR 0019). Only tickers and company
-// names go to Ollama on this machine. The owner can correct any answer in the holdings table.
+// Sector and type per ticker from the owner's chosen AI (ADR 0019, 0020): a local model (stays on
+// this machine) or Claude. Only tickers and company names are sent. The owner can correct any
+// answer in the holdings table.
 
 import * as z from "zod";
 
 import { IDEA_CATEGORIES, IDEA_CATEGORY_LABELS, SECTORS } from "~/lib/ideas";
 import type { StockProfile } from "~/lib/stock-profile";
 
-import { type OllamaContext, ollamaStructured } from "../ollama";
+import type { LlmClient } from "../llm/types";
 
 /** A text-only batch is quick once the model is loaded; loading it can take a minute or two. */
 const TIMEOUT_MS = 180_000;
@@ -32,7 +33,7 @@ export interface StockToClassify {
   name: string | null;
 }
 
-export function buildClassifyPrompt(stocks: readonly StockToClassify[]): string {
+function buildClassifyPrompt(stocks: readonly StockToClassify[]): string {
   return [
     "Classify each of these:",
     ...stocks.map((stock) => `- ${stock.symbol}${stock.name ? ` (${stock.name})` : ""}`),
@@ -41,7 +42,8 @@ export function buildClassifyPrompt(stocks: readonly StockToClassify[]): string 
     `- sector: its GICS sector, one of: ${SECTORS.join(", ")}. Use null for ETFs, index or mutual funds, and anything you can't place.`,
     "- style, the single best fit:",
     ...IDEA_CATEGORIES.map(
-      (style) => `  - ${style} (${IDEA_CATEGORY_LABELS[style].name}): ${IDEA_CATEGORY_LABELS[style].hint}`,
+      (style) =>
+        `  - ${style} (${IDEA_CATEGORY_LABELS[style].name}): ${IDEA_CATEGORY_LABELS[style].hint}`,
     ),
     "  A broad index fund is growth; a dividend or income fund is dividend.",
     "Return one entry per symbol above, with the symbol exactly as given.",
@@ -53,20 +55,16 @@ export function buildClassifyPrompt(stocks: readonly StockToClassify[]): string 
  * weren't asked are dropped; symbols it skipped are simply missing (classified next time).
  */
 export async function classifyStocks(
+  llm: LlmClient,
   stocks: readonly StockToClassify[],
-  context: OllamaContext,
 ): Promise<Array<Omit<StockProfile, "source">>> {
   if (stocks.length === 0) return [];
-  const answer = await ollamaStructured(
-    {
-      feature: "Grouping holdings",
-      system: SYSTEM,
-      prompt: buildClassifyPrompt(stocks),
-      schema: ClassificationSchema,
-      timeoutMs: TIMEOUT_MS,
-    },
-    context,
-  );
+  const { data: answer } = await llm.generateStructured({
+    system: SYSTEM,
+    prompt: buildClassifyPrompt(stocks),
+    schema: ClassificationSchema,
+    timeoutMs: TIMEOUT_MS,
+  });
   const asked = new Set(stocks.map((stock) => stock.symbol));
   const bySymbol = new Map<string, Omit<StockProfile, "source">>();
   for (const profile of answer.profiles) {

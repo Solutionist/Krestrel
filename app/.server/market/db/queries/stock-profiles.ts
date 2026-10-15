@@ -22,23 +22,26 @@ export async function listStockProfiles(
     .where(inArray(stockProfiles.symbol, [...symbols]));
 }
 
-/** Stores the model's classifications; the owner's corrections are left untouched. */
+/**
+ * Stores the model's classifications. The owner's corrections are kept; on the owner's rows the
+ * model only fills a type the owner left empty (they set a sector before it was classified).
+ */
 export async function saveModelProfiles(
   db: Database,
   profiles: ReadonlyArray<Omit<StockProfile, "source">>,
 ): Promise<void> {
   if (profiles.length === 0) return;
+  const owned = sql`${stockProfiles.source} = 'owner'`;
   await db
     .insert(stockProfiles)
     .values(profiles.map((profile) => ({ ...profile, source: "model" as const })))
     .onConflictDoUpdate({
       target: stockProfiles.symbol,
       set: {
-        sector: sql`excluded.sector`,
-        style: sql`excluded.style`,
+        sector: sql`CASE WHEN ${owned} THEN ${stockProfiles.sector} ELSE excluded.sector END`,
+        style: sql`CASE WHEN ${owned} THEN COALESCE(${stockProfiles.style}, excluded.style) ELSE excluded.style END`,
         updatedAt: sql`now()`,
       },
-      setWhere: sql`${stockProfiles.source} = 'model'`,
     });
 }
 

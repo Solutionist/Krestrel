@@ -7,7 +7,7 @@ import { formatPrice, formatShares } from "~/lib/format";
 import type { QuoteSnapshot } from "~/lib/market";
 import { sharesToReachAverage, type ValuedPosition } from "~/lib/portfolio";
 
-import { FIELD, HEADING, LABEL } from "../ui/styles";
+import { FIELD, LABEL } from "../ui/styles";
 
 const INPUT = `${FIELD} h-9 w-full tabular-nums`;
 const CUSTOM = "__custom";
@@ -69,11 +69,11 @@ export function AverageCalculator({
     display.currency === BASE_CURRENCY ? "" : ` (≈ ${display.money(amount)})`;
 
   return (
-    <section aria-labelledby="calculator-heading" className="grid gap-3">
-      <h2 id="calculator-heading" className={`${HEADING} flex items-center gap-1.5`}>
-        <CalculatorIcon aria-hidden size={16} className="text-accent" />
-        Average-down calculator
-      </h2>
+    <div className="grid gap-3">
+      <p className="flex items-center gap-1.5 text-xs text-muted">
+        <CalculatorIcon aria-hidden size={14} className="text-accent" />
+        How many shares to buy at a lower price to bring your average cost down to a target.
+      </p>
       <div className="grid gap-4 rounded-xl bg-subtle p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid grid-cols-2 gap-3 self-start">
           <label className="col-span-2 grid gap-1.5">
@@ -225,6 +225,6 @@ export function AverageCalculator({
           )}
         </div>
       </div>
-    </section>
+    </div>
   );
 }

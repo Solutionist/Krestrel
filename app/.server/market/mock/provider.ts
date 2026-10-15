@@ -326,5 +326,40 @@ export function createMockProvider(
         .filter((item) => Date.parse(item.createdAt) >= since.getTime())
         .slice(0, limit);
     },
+
+    async getDividends(symbols, startDay, endDay) {
+      // Simulated, deterministic per symbol: about 40% pay nothing, most others quarterly, some
+      // monthly; 1–5% a year of the reference price. Like real companies, only payments up to a
+      // month ahead are "announced", so the page also shows expected ones.
+      const start = Date.parse(`${startDay}T00:00:00Z`);
+      const end = Math.min(Date.parse(`${endDay}T00:00:00Z`), now() + 30 * DAY_MS);
+      const anchor = Date.parse("2000-01-03T00:00:00Z");
+      return symbols
+        .flatMap((symbol) => {
+          const hash = hashSymbol(symbol);
+          const kind = hashToUnit(seed, hash, 7);
+          if (kind < 0.4) return [];
+          const stepDays = kind > 0.85 ? 30 : 91;
+          const perYear = stepDays === 30 ? 12 : 4;
+          const amount =
+            roundCents((basePrice(symbol) * (0.01 + 0.04 * hashToUnit(seed, hash, 8))) / perYear) ||
+            0.01;
+          const offset = Math.floor(hashToUnit(seed, hash, 9) * stepDays) * DAY_MS;
+          const first = Math.ceil((start - anchor - offset) / (stepDays * DAY_MS));
+          const payments = [];
+          for (let n = first; anchor + offset + n * stepDays * DAY_MS <= end; n++) {
+            const ex = anchor + offset + n * stepDays * DAY_MS;
+            payments.push({
+              symbol,
+              exDate: new Date(ex).toISOString().slice(0, 10),
+              payDate: new Date(ex + 14 * DAY_MS).toISOString().slice(0, 10),
+              amount,
+              special: false,
+            });
+          }
+          return payments;
+        })
+        .sort((a, b) => a.exDate.localeCompare(b.exDate));
+    },
   };
 }

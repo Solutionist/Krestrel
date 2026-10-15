@@ -7,12 +7,14 @@ import {
 } from "@phosphor-icons/react";
 import { Link, useFetcher } from "react-router";
 
+import type { DividendInfo } from "~/lib/dividends";
 import { formatChange, formatPercentChange, formatPrice } from "~/lib/format";
 import { type Idea, SECTOR_SHORT } from "~/lib/ideas";
 import type { QuoteSnapshot } from "~/lib/market";
 import { priceChange } from "~/lib/price-change";
 import type { WatchlistActionResult } from "~/routes/api.watchlist";
 
+import { DividendSummary } from "../dividend-text";
 import { Button } from "../ui/button";
 import { LABEL } from "../ui/styles";
 import { DIRECTION_GLYPH, DIRECTION_TEXT } from "../watchlist/watchlist-row";
@@ -22,17 +24,21 @@ const IDEA_CARD = "flex flex-col gap-3 rounded-xl bg-subtle/60 p-4";
 
 /**
  * One idea: what it is, today's price, why it is worth a look, how it fits the mix, the main
- * risk, a few numbers and Claude's sources; then watch it or open its chart.
+ * risk, a few numbers, when it pays a dividend, and the AI's sources; then watch it or open its
+ * chart.
  */
 export function IdeaCard({
   idea,
   quote,
   watched,
+  dividend,
 }: {
   idea: Idea;
   /** Live quote from the stream (watched symbols); else the price captured with the idea. */
   quote: QuoteSnapshot | null;
   watched: boolean;
+  /** The provider's dividend schedule (ADR 0022); null when it pays none, undefined when unknown. */
+  dividend: { info: DividendInfo | null; today: string } | undefined;
 }) {
   const watch = useFetcher<WatchlistActionResult>();
   const live = quote ?? {
@@ -106,48 +112,53 @@ export function IdeaCard({
         </dl>
       )}
 
-      <footer className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
-        <ul aria-label="Sources" className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
-          {sources.map((source) => (
-            <li key={source.url} className="min-w-0">
-              <a
-                href={source.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="group inline-flex max-w-48 items-center gap-0.5 text-muted hover:text-accent"
-              >
-                <span className="truncate">{source.title}</span>
-                <ArrowUpRightIcon aria-hidden size={12} className="shrink-0" />
-                <span className="sr-only"> (opens in a new tab)</span>
-              </a>
-            </li>
-          ))}
-        </ul>
-        {added ? (
-          <Link
-            to={`/?symbol=${encodeURIComponent(idea.symbol)}`}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-accent transition-colors duration-150 hover:bg-accent/10"
-          >
-            <ChartLineUpIcon aria-hidden size={14} />
-            Open chart
-          </Link>
-        ) : (
-          <Button
-            size="sm"
-            disabled={watch.state !== "idle"}
-            title={`Add ${idea.symbol} to your watchlist`}
-            onClick={() =>
-              watch.submit(
-                { intent: "add", symbol: idea.symbol },
-                { method: "post", action: "/api/watchlist", encType: "application/json" },
-              )
-            }
-          >
-            <PlusIcon aria-hidden size={14} />
-            {watch.state === "idle" ? "Watch" : "Adding…"}
-          </Button>
+      <div className="mt-auto grid gap-2.5">
+        {dividend?.info && (
+          <DividendSummary info={dividend.info} today={dividend.today} price={live.lastPrice} />
         )}
-      </footer>
+        <footer className="flex flex-wrap items-center justify-between gap-2 pt-1">
+          <ul aria-label="Sources" className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs">
+            {sources.map((source) => (
+              <li key={source.url} className="min-w-0">
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group inline-flex max-w-48 items-center gap-0.5 text-muted hover:text-accent"
+                >
+                  <span className="truncate">{source.title}</span>
+                  <ArrowUpRightIcon aria-hidden size={12} className="shrink-0" />
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          {added ? (
+            <Link
+              to={`/?symbol=${encodeURIComponent(idea.symbol)}`}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium text-accent transition-colors duration-150 hover:bg-accent/10"
+            >
+              <ChartLineUpIcon aria-hidden size={14} />
+              Open chart
+            </Link>
+          ) : (
+            <Button
+              size="sm"
+              disabled={watch.state !== "idle"}
+              title={`Add ${idea.symbol} to your watchlist`}
+              onClick={() =>
+                watch.submit(
+                  { intent: "add", symbol: idea.symbol },
+                  { method: "post", action: "/api/watchlist", encType: "application/json" },
+                )
+              }
+            >
+              <PlusIcon aria-hidden size={14} />
+              {watch.state === "idle" ? "Watch" : "Adding…"}
+            </Button>
+          )}
+        </footer>
+      </div>
       {watchError && (
         <p role="alert" className="flex items-start gap-1.5 text-xs text-fall">
           <WarningCircleIcon aria-hidden size={14} className="mt-px shrink-0" />
@@ -158,7 +169,7 @@ export function IdeaCard({
   );
 }
 
-/** Placeholder shaped like an idea card while Claude works. */
+/** Placeholder shaped like an idea card while the AI works. */
 export function IdeaCardSkeleton() {
   return (
     <div aria-hidden className={IDEA_CARD}>

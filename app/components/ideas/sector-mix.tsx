@@ -25,7 +25,7 @@ export const SECTOR_COLORS: Record<Sector, string> = {
 
 const percent = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
 
-/** The starting mix by sector, Claude's read of it, and the sectors worth adding. */
+/** The starting mix by sector, the AI's read of it, and the sectors worth adding. */
 export function SectorMix({
   sectorWeights,
   summary,

@@ -1,19 +1,26 @@
-import { pino } from "pino";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import type * as z from "zod";
 
-import { buildClassifyPrompt, classifyStocks } from "./classify";
+import type { LlmClient, StructuredRequest } from "../llm/types";
+import { classifyStocks } from "./classify";
 
-const logger = pino({ level: "silent" });
-
-function answer(content: unknown): typeof fetch {
-  return vi.fn<typeof fetch>(async () =>
-    Response.json({ message: { role: "assistant", content: JSON.stringify(content) } }),
-  );
+function classifier(answer: unknown) {
+  const requests: StructuredRequest<z.ZodType>[] = [];
+  const llm: LlmClient = {
+    id: "ollama",
+    displayName: "Fake",
+    capabilities: { webSearch: false },
+    async generateStructured(request) {
+      requests.push(request);
+      return { data: request.schema.parse(answer), model: "fake" };
+    },
+  };
+  return { llm, requests };
 }
 
 describe("classifyStocks", () => {
   it("keeps one answer per asked ticker and drops ones it wasn't asked about", async () => {
-    const fetch = answer({
+    const { llm, requests } = classifier({
       profiles: [
         { symbol: "ko", sector: "Consumer Staples", style: "dividend" },
         { symbol: "KO", sector: "Energy", style: "risky" },
@@ -26,28 +33,18 @@ describe("classifyStocks", () => {
       { symbol: "VOO", name: "Vanguard S&P 500 ETF" },
       { symbol: "RKLB", name: null },
     ];
-    await expect(classifyStocks(stocks, { env: {}, logger, fetch })).resolves.toEqual([
+    await expect(classifyStocks(llm, stocks)).resolves.toEqual([
       { symbol: "KO", sector: "Consumer Staples", style: "dividend" },
       { symbol: "VOO", sector: null, style: "growth" },
     ]);
     // The prompt carries the listing names, which helps with lesser-known tickers.
-    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
-    expect(body.messages.at(-1).content).toContain("- KO (The Coca-Cola Company)");
-    expect(body.messages.at(-1).images).toBeUndefined();
+    expect(requests[0]?.prompt).toContain("- KO (The Coca-Cola Company)");
+    expect(requests[0]?.images).toBeUndefined();
   });
 
   it("doesn't call the model when there is nothing to classify", async () => {
-    const fetch = answer({ profiles: [] });
-    await expect(classifyStocks([], { env: {}, logger, fetch })).resolves.toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe("buildClassifyPrompt", () => {
-  it("offers only the GICS sectors and the three types, with null for funds", () => {
-    const prompt = buildClassifyPrompt([{ symbol: "AAPL", name: null }]);
-    expect(prompt).toContain("Information Technology, Communication Services");
-    expect(prompt).toMatch(/null for ETFs/);
-    expect(prompt).toMatch(/growth \(Growth\).*\n.*dividend \(Dividend\).*\n.*risky \(Risky\)/);
+    const { llm, requests } = classifier({ profiles: [] });
+    await expect(classifyStocks(llm, [])).resolves.toEqual([]);
+    expect(requests).toHaveLength(0);
   });
 });

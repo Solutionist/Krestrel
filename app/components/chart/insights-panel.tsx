@@ -40,7 +40,7 @@ function when(seconds: number, timeframe: Timeframe): string {
 
 /**
  * Locally computed facts beside the chart (never on top of it): a forward plan from this chart's
- * levels, then past swings in hindsight. Claude's outlook lives in its own panel (`OutlookPanel`).
+ * levels, then past swings in hindsight. The AI outlook lives in its own panel (`OutlookPanel`).
  */
 export function InsightsPanel({
   analysis,

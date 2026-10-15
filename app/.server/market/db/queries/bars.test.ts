@@ -290,4 +290,26 @@ describe("daily history and calendar candles (ADR 0011)", () => {
     expect(months.map((c) => c.close)).toEqual([8, 13]);
     expect(months[1]?.volume).toBe(2000 + 200);
   });
+
+  it("treats `to` as exclusive, so loading older history never repeats the first candle", async () => {
+    await upsertDailyBars(db, [
+      daily("2026-10-02", 7),
+      daily("2026-10-09", 8),
+      daily("2026-10-12", 10),
+      daily("2026-10-13", 11),
+    ]);
+    // The chart asks for history before its first candle with `to` = that candle's time
+    // (New York midnight): Oct 13 must not come back.
+    const days = await getCalendarCandles(
+      db,
+      query("1D", "2026-10-01T00:00:00Z", "2026-10-13T04:00:00.000Z"),
+    );
+    expect(days.map((c) => c.close)).toEqual([7, 8, 10]);
+    // Same for a week: `to` = the start of the week of Oct 12.
+    const weeks = await getCalendarCandles(
+      db,
+      query("1W", "2026-09-01T00:00:00Z", "2026-10-12T04:00:00.000Z"),
+    );
+    expect(weeks.map((c) => c.close)).toEqual([7, 8]);
+  });
 });

@@ -5,14 +5,12 @@ import {
   WarningCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
-import { createStoredValue } from "~/hooks/stored-value";
+import { useFeatureModel } from "~/hooks/use-ai";
+import { RESEARCH_LABELS } from "~/lib/ai";
 import { INTERVAL_RANGE, PERIOD_NAMES } from "~/lib/chart-ranges";
 import { formatPrice } from "~/lib/format";
 import type { Timeframe } from "~/lib/market";
 import {
-  CLAUDE_MODEL_LABELS,
-  CLAUDE_MODELS,
-  type ClaudeModel,
   type Consensus,
   type NewsTone,
   type Outlook,
@@ -22,8 +20,9 @@ import {
   type Stance,
 } from "~/lib/outlook";
 
+import { FeatureModelPicker } from "../ai/ai-model-picker";
 import { Button, IconButton, ToggleChip } from "../ui/button";
-import { FIELD, HEADING, LABEL } from "../ui/styles";
+import { HEADING, LABEL } from "../ui/styles";
 import { CANDLE_NAMES } from "./chart-toolbar";
 import { PlanLevels } from "./plan-levels";
 
@@ -32,14 +31,6 @@ export type OutlookState =
   | { kind: "loading" }
   | { kind: "error"; message: string }
   | { kind: "done"; result: Extract<OutlookResponse, { ok: true }> };
-
-/** The owner's model choice for the AI outlook, remembered across sessions. */
-export const claudeModel = createStoredValue<ClaudeModel>(
-  "krestrel.claudeModel",
-  "default",
-  (raw) => CLAUDE_MODELS.find((model) => model === raw) ?? null,
-  (model) => model,
-);
 
 /** Chip tints: rise/fall only with their ▲/▼ glyph; neutral states stay muted. */
 const RISE_CHIP = "bg-rise/10 text-rise";
@@ -87,8 +78,8 @@ const NEWS_GLYPHS: Record<NewsTone, { glyph: string; tone: string; label: string
 const CHIP = "inline-flex rounded-md px-1.5 py-0.5 text-xs font-medium";
 
 /**
- * Claude's forward-looking take beside the chart (ADR 0016): news and analyst sentiment found
- * with web search plus Krestrel's own levels, turned into a buy/sell plan. Only runs on a click.
+ * The chosen AI's forward-looking take beside the chart (ADR 0016, 0020): news and analyst
+ * sentiment plus Krestrel's own levels, turned into a buy/sell plan. Only runs on a click.
  */
 export function OutlookPanel({
   symbol,
@@ -115,8 +106,7 @@ export function OutlookPanel({
 }) {
   const result = outlook.kind === "done" ? outlook.result : null;
   const loading = outlook.kind === "loading";
-  const [model, setModel] = claudeModel.use();
-  const modelName = CLAUDE_MODEL_LABELS[model].name;
+  const { choice, name: modelName } = useFeatureModel("outlook");
   const last = lastPrice ?? result?.localPlan?.lastPrice ?? null;
 
   return (
@@ -129,7 +119,7 @@ export function OutlookPanel({
         <h2 className={`${HEADING} flex items-center gap-1.5`}>
           <SparkleIcon aria-hidden size={16} weight="fill" className="text-accent" />
           AI outlook
-          <span className="font-normal text-muted">· Claude</span>
+          <span className="font-normal text-muted">· {modelName}</span>
         </h2>
         <IconButton label="Close AI outlook" onClick={onClose} className="-mr-1.5">
           <XIcon aria-hidden size={14} />
@@ -143,14 +133,18 @@ export function OutlookPanel({
         {outlook.kind === "idle" && (
           <div className="space-y-3 pt-1">
             <p className="text-pretty text-text">
-              Claude reads recent {symbol} news and analyst ratings with web search, adds Krestrel's
-              levels from this chart, and returns the sentiment and a plan: where to buy, where the
-              idea is wrong, and where to sell.
+              {choice.provider === "claude"
+                ? `${modelName} reads recent ${symbol} news and analyst ratings with web search`
+                : `${modelName} reads recent ${symbol} headlines (and web results, with a Tavily key)`}
+              , adds Krestrel's levels from this chart, and returns the sentiment and a plan: where
+              to buy, where the idea is wrong, and where to sell.
             </p>
             <p className="text-xs text-pretty text-muted">
               Uses {CANDLE_NAMES[timeframe]} candles over {PERIOD_NAMES[INTERVAL_RANGE[timeframe]]}{" "}
-              (change the trading style in Insights). Takes 1 to 3 minutes and uses your Claude
-              subscription.
+              (change the trading style in Insights).{" "}
+              {choice.provider === "claude"
+                ? "Takes 1 to 3 minutes and uses your Claude subscription."
+                : "Runs on this computer."}
             </p>
           </div>
         )}
@@ -160,7 +154,7 @@ export function OutlookPanel({
             <p className="flex items-center gap-1.5 text-xs text-muted">
               <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-accent" />
               Reading news and analyst ratings…
-              <span className="sr-only">Claude ({modelName}) is working on the outlook.</span>
+              <span className="sr-only">{modelName} is working on the outlook.</span>
             </p>
             {[88, 72, 94, 60, 80, 68].map((width) => (
               <span
@@ -208,31 +202,21 @@ export function OutlookPanel({
       </div>
 
       <footer className="space-y-3 border-t border-rule/60 p-4">
-        <label className="grid gap-1.5">
+        <div className="grid gap-1.5">
           <span className={LABEL}>Model</span>
-          <select
-            value={model}
-            onChange={(event) => {
-              const next = CLAUDE_MODELS.find((option) => option === event.target.value);
-              if (next) setModel(next);
-            }}
-            disabled={loading}
-            className={`${FIELD} h-9 cursor-pointer`}
-          >
-            {CLAUDE_MODELS.map((option) => (
-              <option key={option} value={option}>
-                {CLAUDE_MODEL_LABELS[option].name} · {CLAUDE_MODEL_LABELS[option].hint}
-              </option>
-            ))}
-          </select>
-        </label>
+          <FeatureModelPicker feature="outlook" label="AI outlook model" disabled={loading} />
+        </div>
         <Button
           variant="primary"
           size="md"
           className="w-full"
           onClick={onAsk}
           disabled={!canAsk || loading}
-          title="Sends the ticker, this chart's prices and recent headlines to Anthropic via your Claude Code CLI."
+          title={
+            choice.provider === "claude"
+              ? "Sends the ticker, this chart's prices and recent headlines to Anthropic via your Claude Code CLI."
+              : "Runs on this computer. With TAVILY_API_KEY set, Krestrel first searches the web for the ticker."
+          }
         >
           <SparkleIcon aria-hidden size={16} />
           <span className={loading ? "animate-pulse" : ""}>
@@ -244,7 +228,7 @@ export function OutlookPanel({
             <span className="block">
               {[
                 result.provider,
-                result.model,
+                result.model && !result.provider.includes(result.model) ? result.model : null,
                 new Date(result.generatedAt).toLocaleTimeString([], {
                   hour: "2-digit",
                   minute: "2-digit",
@@ -253,6 +237,12 @@ export function OutlookPanel({
                 .filter(Boolean)
                 .join(" · ")}
               {" · "}Feed headlines: {result.feedHeadlines}
+            </span>
+          )}
+          {result && (
+            <span className={`block ${result.research === "none" ? "text-text" : ""}`}>
+              {RESEARCH_LABELS[result.research]}
+              {result.researchNote ? ` (${result.researchNote})` : ""}.
             </span>
           )}
           {!canAsk && !loading ? "Not enough history on this interval yet. " : ""}
