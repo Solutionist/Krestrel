@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 export function usePersistedSet<T extends string>(
   storageKey: string,
   allowed: readonly T[],
-): [ReadonlySet<T>, (value: T) => void, (values: Iterable<T>) => void] {
+): [ReadonlySet<T>, (value: T) => void] {
   const [values, setValues] = useState<ReadonlySet<T>>(new Set());
 
   useEffect(() => {
@@ -42,11 +42,5 @@ export function usePersistedSet<T extends string>(
       }),
     [save],
   );
-
-  const add = useCallback(
-    (added: Iterable<T>) => setValues((current) => save(new Set([...current, ...added]))),
-    [save],
-  );
-
-  return [values, toggle, add];
+  return [values, toggle];
 }

@@ -31,6 +31,11 @@ export const TIMEFRAME_NAMES: Record<Timeframe, string> = {
   "1Y": "1 year",
 };
 
+/** Adjective form for sentences: "5-minute candles", "1-week candles". */
+export const CANDLE_NAMES = Object.fromEntries(
+  TIMEFRAMES.map((tf) => [tf, TIMEFRAME_NAMES[tf].replace(/^(\d+) (\w+?)s?$/, "$1-$2")]),
+) as Record<Timeframe, string>;
+
 const INTERVAL_OPTIONS: readonly SegmentedOption<Timeframe>[] = TIMEFRAMES.map((tf) => ({
   value: tf,
   label: tf,
@@ -39,12 +44,13 @@ const INTERVAL_OPTIONS: readonly SegmentedOption<Timeframe>[] = TIMEFRAMES.map((
 /** Splits intraday intervals from calendar ones. */
 const INTERVAL_DIVIDERS: readonly Timeframe[] = ["1D"];
 
-export const OVERLAYS = ["trades", "levels"] as const;
+export const OVERLAYS = ["trades", "levels", "plan"] as const;
 export type Overlay = (typeof OVERLAYS)[number];
-const OVERLAY_LABELS: Record<Overlay, string> = { trades: "Buy/Sell", levels: "S/R" };
+const OVERLAY_LABELS: Record<Overlay, string> = { trades: "Buy/Sell", levels: "S/R", plan: "Plan" };
 const OVERLAY_NAMES: Record<Overlay, string> = {
   trades: "Best past buy and sell points (hindsight)",
   levels: "Support and resistance levels, and trend support",
+  plan: "Buy zone, stop and targets",
 };
 
 export function ChartToolbar({
@@ -67,8 +73,8 @@ export function ChartToolbar({
   overlays: ReadonlySet<Overlay>;
   onToggleOverlay: (id: Overlay) => void;
   /** The column beside the chart. */
-  sidePanel: "claude" | "insights" | "none";
-  onTogglePanel: (panel: "claude" | "insights") => void;
+  sidePanel: "outlook" | "insights" | "none";
+  onTogglePanel: (panel: "outlook" | "insights") => void;
   loading: boolean;
 }) {
   return (
@@ -118,13 +124,13 @@ export function ChartToolbar({
           Insights
         </ToggleChip>
         <ToggleChip
-          pressed={sidePanel === "claude"}
-          aria-controls="chart-claude"
-          onClick={() => onTogglePanel("claude")}
-          title="AI analysis of this chart by Claude, in a panel beside it"
+          pressed={sidePanel === "outlook"}
+          aria-controls="chart-outlook"
+          onClick={() => onTogglePanel("outlook")}
+          title="Claude's outlook from news, analyst ratings and this chart, in a panel beside it"
         >
           <SparkleIcon aria-hidden size={14} weight="fill" className="text-accent" />
-          AI analysis
+          AI outlook
         </ToggleChip>
       </div>
     </div>

@@ -530,4 +530,38 @@ describe("Alpaca REST", () => {
       "https://paper-api.alpaca.markets/v2/assets?status=active&asset_class=us_equity",
     );
   });
+
+  it("reads recent headlines newest first, linking only articles with a public page", async () => {
+    const { provider, requests } = restSetup([json(fixtureJson("rest-news.json"))]);
+    await expect(provider.getNews("AAPL", new Date("2026-09-14T00:00:00Z"), 20)).resolves.toEqual([
+      {
+        id: "62345574",
+        headline: "Apple Shares Rise After Supplier Raises Guidance",
+        summary: "A key supplier lifted its quarterly outlook.",
+        source: "benzinga",
+        url: "https://www.benzinga.com/news/26/10/62345574/apple-shares-rise",
+        createdAt: "2026-10-14T07:36:15.000Z",
+      },
+      {
+        id: "62340001",
+        headline: "Options Activity In Apple",
+        summary: "",
+        source: "benzinga",
+        url: null,
+        createdAt: "2026-10-13T20:05:00.000Z",
+      },
+    ]);
+    const [request] = requests();
+    expect(request?.url.origin + (request?.url.pathname ?? "")).toBe(
+      "https://data.alpaca.markets/v1beta1/news",
+    );
+    expect(Object.fromEntries(request?.url.searchParams ?? [])).toEqual({
+      symbols: "AAPL",
+      start: "2026-09-14T00:00:00.000Z",
+      limit: "20",
+      sort: "desc",
+      include_content: "false",
+    });
+    expect(request?.headers.get("APCA-API-KEY-ID")).toBe("test-key-id");
+  });
 });

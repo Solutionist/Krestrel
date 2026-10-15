@@ -1,6 +1,6 @@
 # 0012: Hindsight chart analysis, explained by Claude via the user's subscription
 
-- Status: accepted (owner decisions, 2026-10-14)
+- Status: accepted (owner decisions, 2026-10-14); the past-trade explanation (`/api/analysis`) is superseded by ADR 0016 (AI outlook)
 - Date: 2026-10-14
 
 ## Context
@@ -38,3 +38,4 @@ The owner asked to use Claude "with the chart (using subscription)" to tag the b
 
 - The panel is named **AI analysis** (by Claude) with one action, "Analyze this chart", to avoid two buttons both called "Ask Claude".
 - The owner picks the model per analysis (Default, Haiku, Sonnet, Opus, Fable: Claude Code aliases that resolve to the latest model of each tier), remembered in `krestrel.claudeModel`. The server accepts only these values and passes the alias as `--model`; `default` falls back to `CLAUDE_MODEL` / the CLI default.
+- Insights and AI analysis look only at the chart interval's period (`analysisWindow`: e.g. 1D → last year), not all loaded history; a trading-style picker (Day trade, Swing, Position, Long term) sets the interval, so day traders and long-term investors each get swings at their own scale.

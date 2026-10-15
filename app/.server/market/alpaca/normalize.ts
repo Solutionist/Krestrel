@@ -7,11 +7,12 @@ import type {
   DailyBar,
   MarketClock,
   MarketPhase,
+  NewsItem,
   QuoteSnapshot,
   Tick,
 } from "~/lib/market";
 
-import type { AlpacaAsset, Clock, RestBar, Snapshot, TradeMessage } from "./schemas";
+import type { AlpacaAsset, Clock, NewsArticle, RestBar, Snapshot, TradeMessage } from "./schemas";
 
 /**
  * RFC 3339 → epoch ms. Node 24's `Date.parse` accepts nanosecond fractions and truncates them
@@ -105,4 +106,17 @@ export function assetToAsset(asset: AlpacaAsset): Asset | null {
     asset.tradable &&
     SUPPORTED_EXCHANGES[asset.exchange] === true;
   return eligible ? { symbol: asset.symbol, name: asset.name, exchange: asset.exchange } : null;
+}
+
+/** Alpaca's news feed is Benzinga's; an article without a public http(s) page gets no link. */
+export function newsToNewsItem(article: NewsArticle): NewsItem {
+  const url = article.url?.trim() ?? "";
+  return {
+    id: String(article.id),
+    headline: article.headline.trim(),
+    summary: article.summary?.trim() ?? "",
+    source: article.source?.trim() || "benzinga",
+    url: /^https?:\/\//i.test(url) ? url : null,
+    createdAt: new Date(toEpochMs(article.created_at)).toISOString(),
+  };
 }

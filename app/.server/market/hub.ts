@@ -6,6 +6,7 @@ import {
   type Asset,
   type ConnectionStatus,
   type MarketClock,
+  type NewsItem,
   type ProviderInfo,
   type QuoteSnapshot,
   SymbolSchema,
@@ -31,6 +32,8 @@ const CLOCK_MAX_DELAY_MS = 30 * MINUTE;
 const CLOCK_RETRY_MS = MINUTE;
 /** Listings change rarely (IPOs, delistings); refresh the search index daily. */
 const ASSET_LIST_TTL_MS = 24 * 60 * MINUTE;
+const NEWS_LOOKBACK_MS = 30 * 24 * 60 * MINUTE;
+const NEWS_LIMIT = 20;
 
 export type HubListener = (event: StreamEvent | { event: "shutdown" }) => void;
 
@@ -205,6 +208,49 @@ export class MarketHub {
         this.#assetsLoading = null;
       });
     return this.#assetsLoading;
+  }
+
+  /**
+   * Exact-ticker lookup in the cached listing (never adds to the watchlist); null when the
+   * provider does not list it. Throws, like search, when no listing could be loaded.
+   */
+  async findAsset(symbol: string): Promise<Asset | null> {
+    const upper = symbol.trim().toUpperCase();
+    const [best] = (await this.#assetIndex()).search(upper, 1);
+    return best?.symbol.toUpperCase() === upper ? best : null;
+  }
+
+  /**
+   * One-off quotes for any symbols, without subscribing them. Quotes are optional context, so a
+   * failure is logged and yields an empty map.
+   */
+  async getQuotes(symbols: readonly string[]): Promise<Map<string, QuoteSnapshot>> {
+    const unique = [...new Set(symbols)];
+    if (unique.length === 0) return new Map();
+    try {
+      const snapshots = await this.#provider.getSnapshots(unique);
+      return new Map(snapshots.map((snapshot) => [snapshot.symbol, snapshot]));
+    } catch (err) {
+      this.#log.warn({ err, symbols: unique.length }, "quote request failed");
+      return new Map();
+    }
+  }
+
+  /**
+   * The provider's headlines for `symbol` from the last 30 days, newest first. News is optional
+   * context for the AI outlook, so a failure is logged and yields no headlines.
+   */
+  async getNews(symbol: string): Promise<NewsItem[]> {
+    try {
+      return await this.#provider.getNews(
+        symbol,
+        new Date(this.#now() - NEWS_LOOKBACK_MS),
+        NEWS_LIMIT,
+      );
+    } catch (err) {
+      this.#log.warn({ err, symbol }, "news request failed");
+      return [];
+    }
   }
 
   async addSymbol(input: string): Promise<AddSymbolResult> {

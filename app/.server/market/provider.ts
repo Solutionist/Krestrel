@@ -10,6 +10,7 @@ import type {
   ConnectionStatus,
   DailyBar,
   MarketClock,
+  NewsItem,
   ProviderInfo,
   QuoteSnapshot,
   Tick,
@@ -61,6 +62,8 @@ export interface MarketDataProvider extends ProviderCapabilities {
    * (Alpaca: ~11k); the hub caches it and refreshes daily.
    */
   listAssets(): Promise<Asset[]>;
+  /** Headlines mentioning `symbol` published since `since`, newest first, at most `limit`. */
+  getNews(symbol: string, since: Date, limit: number): Promise<NewsItem[]>;
 }
 
 export interface ProviderContext {

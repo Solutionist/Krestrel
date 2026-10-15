@@ -2,37 +2,73 @@ import { ChartLineUpIcon, SparkleIcon, XIcon } from "@phosphor-icons/react";
 
 import type { Analysis, Trade } from "~/lib/analysis";
 import { formatExchangeShort } from "~/lib/candles";
+import {
+  HORIZON_INTERVAL,
+  HORIZON_LABELS,
+  HORIZONS,
+  type Horizon,
+  INTERVAL_RANGE,
+  PERIOD_NAMES,
+} from "~/lib/chart-ranges";
 import { formatPrice } from "~/lib/format";
 import { isCalendarTimeframe, type Timeframe } from "~/lib/market";
 import { describePoint, type TradeContext } from "~/lib/trade-context";
+import type { TradePlan, TrendBias } from "~/lib/trade-plan";
 
-import { Button, IconButton } from "../ui/button";
+import { Button, IconButton, ToggleChip } from "../ui/button";
+import { Segmented, type SegmentedOption } from "../ui/segmented";
 import { HEADING, LABEL } from "../ui/styles";
+import { CANDLE_NAMES } from "./chart-toolbar";
+import { PlanLevels } from "./plan-levels";
+
+const HORIZON_OPTIONS: readonly SegmentedOption<Horizon>[] = HORIZONS.map((h) => ({
+  value: h,
+  label: HORIZON_LABELS[h],
+  title: `${HORIZON_LABELS[h]}: ${CANDLE_NAMES[HORIZON_INTERVAL[h]]} candles over ${PERIOD_NAMES[INTERVAL_RANGE[HORIZON_INTERVAL[h]]]}`,
+}));
+
+/** Rise/fall tint only with its ▲/▼ glyph. */
+const BIAS_CHIPS: Record<TrendBias, { label: string; tint: string }> = {
+  uptrend: { label: "▲ Uptrend", tint: "bg-rise/10 text-rise" },
+  sideways: { label: "Sideways", tint: "bg-subtle text-text" },
+  downtrend: { label: "▼ Downtrend", tint: "bg-fall/10 text-fall" },
+};
 
 function when(seconds: number, timeframe: Timeframe): string {
   return formatExchangeShort(seconds * 1000, !isCalendarTimeframe(timeframe));
 }
 
 /**
- * Locally computed hindsight facts beside the chart (never on top of it). Claude's take lives in
- * its own panel (`ClaudePanel`, ADR 0012).
+ * Locally computed facts beside the chart (never on top of it): a forward plan from this chart's
+ * levels, then past swings in hindsight. Claude's outlook lives in its own panel (`OutlookPanel`).
  */
 export function InsightsPanel({
   analysis,
   contexts,
+  plan,
   timeframe,
-  onOpenClaude,
+  planShown,
+  onTogglePlan,
+  onOpenOutlook,
+  onInterval,
   onFocusTrade,
   onClose,
 }: {
   analysis: Analysis | null;
   contexts: readonly TradeContext[];
+  plan: TradePlan | null;
   timeframe: Timeframe;
-  /** Switches the side column to Claude's panel. */
-  onOpenClaude: () => void;
+  /** Whether the plan overlay is drawn on the chart. */
+  planShown: boolean;
+  onTogglePlan: () => void;
+  /** Switches the side column to the AI outlook. */
+  onOpenOutlook: () => void;
+  /** Picks a trading style's chart interval (insights follow the interval's period). */
+  onInterval: (timeframe: Timeframe) => void;
   onFocusTrade: (trade: Trade) => void;
   onClose: () => void;
 }) {
+  const horizon = HORIZONS.find((h) => HORIZON_INTERVAL[h] === timeframe) ?? null;
   const contextFor = (id: string) => contexts.find((c) => c.tradeId === id);
 
   return (
@@ -51,7 +87,59 @@ export function InsightsPanel({
         </IconButton>
       </header>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1 pt-1 pb-4 text-sm">
+      <div className="space-y-1.5 px-4 pb-3">
+        <Segmented
+          label="Trading style"
+          options={HORIZON_OPTIONS}
+          value={horizon}
+          onChange={(h) => onInterval(HORIZON_INTERVAL[h])}
+          className="w-full [&>span]:flex-1 [&>span>button]:w-full [&>span>button]:whitespace-nowrap"
+        />
+        <p className="text-xs text-muted">
+          {horizon ? "" : "Custom: "}
+          {CANDLE_NAMES[timeframe]} candles over {PERIOD_NAMES[INTERVAL_RANGE[timeframe]]}.
+        </p>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-1 pt-1 pb-4 text-sm">
+        {plan && (
+          <section aria-labelledby="insights-plan" className="px-3">
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <h3 id="insights-plan" className={HEADING}>
+                Plan
+              </h3>
+              <span
+                className={`rounded-md px-1.5 py-0.5 text-xs font-medium ${BIAS_CHIPS[plan.bias].tint}`}
+              >
+                {BIAS_CHIPS[plan.bias].label}
+              </span>
+            </div>
+            <PlanLevels
+              lastPrice={plan.lastPrice}
+              buyZone={plan.buyZone}
+              stop={plan.stop}
+              targets={plan.targets}
+              noZone={
+                plan.bias === "downtrend"
+                  ? "No buy zone while it's falling; wait for a higher low."
+                  : "No support below the price in this range."
+              }
+            />
+            {plan.riskReward !== null && (
+              <div className="grid grid-cols-[4.5rem_1fr] gap-x-2 border-t border-rule/60 py-1.5">
+                <span className="text-xs text-muted">Reward : risk</span>
+                <span className="text-text tabular-nums">{plan.riskReward.toFixed(1)} : 1</span>
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <p className="text-xs text-muted">From this chart's levels. A plan, not advice.</p>
+              <ToggleChip pressed={planShown} onClick={onTogglePlan} className="shrink-0">
+                <ChartLineUpIcon aria-hidden size={14} />
+                Show on chart
+              </ToggleChip>
+            </div>
+          </section>
+        )}
         {!analysis || analysis.pivots.length < 2 ? (
           <div className="flex items-start gap-3 px-3 pt-2">
             <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-subtle text-muted">
@@ -61,16 +149,16 @@ export function InsightsPanel({
               <span className="block text-text">
                 Not enough history on this interval to find swings.
               </span>
-              Pick a longer range.
+              Try a longer trading style.
             </p>
           </div>
         ) : (
           <>
             <section aria-labelledby="insights-trades">
               <h3 id="insights-trades" className={`${LABEL} mb-1 px-3`}>
-                Best past round trips{" "}
+                Past swings{" "}
                 <span className="font-normal tabular-nums">
-                  · swing {(analysis.swingThreshold * 100).toFixed(1)}%
+                  · moves ≥ {(analysis.swingThreshold * 100).toFixed(1)}%
                 </span>
               </h3>
               {analysis.trades.length === 0 ? (
@@ -175,11 +263,11 @@ export function InsightsPanel({
       </div>
 
       <footer className="space-y-2 border-t border-rule/60 p-4">
-        <Button variant="secondary" size="md" className="w-full" onClick={onOpenClaude}>
+        <Button variant="secondary" size="md" className="w-full" onClick={onOpenOutlook}>
           <SparkleIcon aria-hidden size={16} className="text-accent" />
-          Explain with AI
+          Get AI outlook
         </Button>
-        <p className="text-xs text-muted">Points computed locally. Hindsight, not advice.</p>
+        <p className="text-xs text-muted">Computed locally from this chart. Not advice.</p>
       </footer>
     </aside>
   );

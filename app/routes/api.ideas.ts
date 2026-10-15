@@ -1,0 +1,158 @@
+import {
+  generateIdeas,
+  holdingWeights,
+  type IdeasBasis,
+  openPositions,
+} from "~/.server/analysis/ideas";
+import { getLlm } from "~/.server/llm/instance";
+import { LlmError } from "~/.server/llm/types";
+import { logger } from "~/.server/logger";
+import { db } from "~/.server/market/db/instance";
+import { listTrades } from "~/.server/market/db/queries/portfolios";
+import { getMarketHub } from "~/.server/market/instance";
+import {
+  type Idea,
+  type IdeasModelOutput,
+  IdeasRequestSchema,
+  type IdeasResponse,
+  type Sector,
+} from "~/lib/ideas";
+
+import type { Route } from "./+types/api.ideas";
+
+/** Fewer verified ideas than this is not worth showing. */
+const MIN_VERIFIED_IDEAS = 3;
+
+const STATUS: Record<LlmError["code"], number> = {
+  disabled: 503,
+  not_installed: 503,
+  not_signed_in: 503,
+  busy: 429,
+  rate_limited: 429,
+  timeout: 504,
+  invalid_output: 502,
+  failed: 502,
+};
+
+function fail(status: number, code: string, message: string): Response {
+  return Response.json({ ok: false, error: { code, message } } satisfies IdeasResponse, {
+    status,
+  });
+}
+
+/**
+ * The mix that steers the ideas: open holdings across all portfolios by value; else the
+ * watchlist, equally weighted; else nothing.
+ */
+async function startingMix(
+  watchlist: readonly string[],
+): Promise<{ basis: IdeasBasis; holdings: Array<{ symbol: string; weight: number }> }> {
+  const positions = openPositions(await listTrades(db));
+  if (positions.length > 0) {
+    const quotes = await getMarketHub().getQuotes(positions.map((position) => position.symbol));
+    return { basis: "portfolio", holdings: holdingWeights(positions, quotes) };
+  }
+  if (watchlist.length > 0) {
+    return {
+      basis: "watchlist",
+      holdings: watchlist.map((symbol) => ({ symbol, weight: 1 / watchlist.length })),
+    };
+  }
+  return { basis: "none", holdings: [] };
+}
+
+/**
+ * POST /api/ideas { focus?, model? } → 5–10 stock ideas (growth / dividend / risky) researched by
+ * Claude with web search, steered by the owner's mix. Only symbols and percent weights leave the
+ * server. Every ticker is checked against the provider's listing. Only called on an explicit click.
+ */
+export async function action({ request }: Route.ActionArgs) {
+  const body = IdeasRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!body.success) return fail(400, "invalid", "Invalid ideas request.");
+  const { focus, model } = body.data;
+
+  try {
+    const llm = getLlm();
+    const hub = getMarketHub();
+    await hub.start(); // The watchlist is loaded on start.
+    const watchlist = hub.snapshot().watchlist;
+    const { basis, holdings } = await startingMix(watchlist);
+    const { ideas: answer, model: usedModel } = await generateIdeas(llm, {
+      focus,
+      basis,
+      holdings: holdings.map((holding) => ({
+        symbol: holding.symbol,
+        weightPct: holding.weight * 100,
+      })),
+      model,
+      now: Date.now(),
+    });
+
+    let listed: Array<{ idea: IdeasModelOutput["ideas"][number]; exchange: string; name: string }>;
+    try {
+      const assets = await Promise.all(answer.ideas.map((idea) => hub.findAsset(idea.symbol)));
+      listed = answer.ideas.flatMap((idea, i) => {
+        const asset = assets[i];
+        return asset
+          ? [{ idea, exchange: asset.exchange, name: asset.name.trim() || idea.name }]
+          : [];
+      });
+    } catch (err) {
+      logger.error({ err }, "ideas: asset listing unavailable");
+      return fail(
+        502,
+        "upstream",
+        `Couldn't check the suggested tickers with ${hub.provider.displayName}. Try again in a moment.`,
+      );
+    }
+    if (listed.length < MIN_VERIFIED_IDEAS) {
+      return fail(
+        502,
+        "invalid_output",
+        "Claude suggested too few stocks that are listed on NYSE or Nasdaq. Try again.",
+      );
+    }
+
+    const quotes = await hub.getQuotes(listed.map(({ idea }) => idea.symbol));
+    const watched = new Set(watchlist);
+    const ideas: Idea[] = listed.map(({ idea, exchange, name }) => {
+      const quote = quotes.get(idea.symbol);
+      return {
+        ...idea,
+        name,
+        exchange,
+        lastPrice: quote?.lastPrice ?? null,
+        previousClose: quote?.previousClose ?? null,
+        watched: watched.has(idea.symbol),
+      };
+    });
+
+    const sectorOf = new Map(answer.holdingSectors.map((entry) => [entry.symbol, entry.sector]));
+    const bySector = new Map<Sector, number>();
+    const withSectors = holdings.map((holding) => {
+      const sector = sectorOf.get(holding.symbol) ?? null;
+      if (sector) bySector.set(sector, (bySector.get(sector) ?? 0) + holding.weight);
+      return { ...holding, sector };
+    });
+
+    return Response.json({
+      ok: true,
+      provider: llm.displayName,
+      model: usedModel,
+      focus,
+      basis,
+      holdings: withSectors,
+      sectorWeights: [...bySector]
+        .map(([sector, weight]) => ({ sector, weight }))
+        .sort((a, b) => b.weight - a.weight),
+      summary: answer.summary,
+      suggestedSectors: answer.suggestedSectors,
+      ideas,
+      generatedAt: new Date().toISOString(),
+    } satisfies IdeasResponse);
+  } catch (err) {
+    if (err instanceof LlmError) return fail(STATUS[err.code], err.code, err.message);
+    logger.error({ err, focus }, "ideas failed");
+    return fail(500, "failed", "The ideas failed unexpectedly. Check the server log.");
+  }
+}

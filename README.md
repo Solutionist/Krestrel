@@ -10,12 +10,14 @@ A featherweight, self-hosted real-time ticker for NYSE & Nasdaq. Live prices, ca
 - **Clean light and dark navy themes** (follows your system, switch in the top bar), Geist type.
 - **Live prices** with change vs. previous close (▲/▼ plus colour), a brief flash on update, and a connection indicator.
 - **Candlestick charts** (TradingView Lightweight Charts) with TradingView-style intervals: 1m, 5m, 15m, 30m, 1h, 4h, 1D, 1W, 2W, 1M, 1Y, axis labels in New York time. Each interval opens on a sensible period (1m shows a day, 1D a year, 1W five years); scroll to zoom, drag to pan; **Select range** (or Shift+drag) lets you drag from a start point to an end point to see that period's change, bars and high/low, then zooms into it, and ↶ goes back to the previous view.
-- **Hindsight analysis**: Buy/Sell markers at the most profitable past swing-low→swing-high round trips, support/resistance lines (S1…/R1…) and a rising trend-support line, computed locally.
-- **AI analysis**: Claude (pick Haiku, Sonnet, Opus or Fable) ranks and explains those points using your own Claude Code CLI and Claude subscription (opt-in per click; sends that chart's candles to Anthropic). Hindsight, not financial advice.
+- **Hindsight analysis and trade plan**: Buy/Sell markers at the most profitable past swing-low→swing-high round trips, support/resistance lines (S1…/R1…) and a rising trend-support line, plus a rule-based plan (buy zone, stop, targets, reward:risk) from those levels, all computed locally.
+- **AI outlook**: Claude (pick Haiku, Sonnet, Opus or Fable) reads recent news (Alpaca's Benzinga headlines plus its own web search), the Wall Street consensus and price targets, and suggests where to buy, where to exit and where to take profit, with linked sources. Uses your own Claude Code CLI and Claude subscription; opt-in per click (sends the ticker, that chart's candles and headlines to Anthropic; Claude may only search and read the web). A plan, not financial advice.
+- **Stock ideas**: 5 to 10 stocks worth a look, split into growth, dividend and risky, with why, how it fits, the main risk, key numbers and sources. Claude reads your portfolio's sector mix to suggest what would diversify it, or you pick a sector to focus on; watch an idea or open its chart in one click. Same Claude Code CLI and opt-in as the AI outlook (sends only tickers and their share of your portfolio, no amounts or share counts). Not financial advice.
 - **Indicators**: EMA 20/50/100, Bollinger Bands (20, 2) and RSI 14 (own pane), toggled per chart and remembered. Up to 10 years of daily history for the long intervals. History loads first, then the live candle updates in real time.
 - **Watchlist sorting**: my order, symbol, price, change % or change, ascending or descending, remembered.
 - **RSI signals**: overbought/oversold zones and Buy/Sell markers in the RSI pane, plus a daily RSI signal (Oversold, Buy, Sell, Overbought) for every watchlist stock and holding, using one set of levels you choose (default 70/30). A momentum rule of thumb, not advice.
 - **Portfolios**: named portfolios of buy/sell trades (fractional shares, fees), live value, unrealized/realized/today's P/L with the average-cost method, and an all-portfolios total. Sells of more shares than you held are refused.
+- **Average-down calculator** on the Portfolio page: how many shares to buy at a price to bring your average cost to a target (e.g. 50 @ $150, buy at $80, target $120 → 37.5 shares, $3,000).
 - **Display currency**: view portfolio amounts (and a converted chart price) in THB or ~30 other currencies at the European Central Bank's daily rate (via frankfurter.dev; only currency codes are sent).
 - **Minute-bar recording**: live 1-minute bars are stored, and full-market history is backfilled automatically.
 - **Market status**: open, closed, pre-market, after hours.
@@ -66,7 +68,7 @@ Open http://127.0.0.1:3000. Ports are published on `127.0.0.1` only.
 | `ALPACA_STREAM_FEED` | `iex` | `iex` (free) or `sip` (paid) |
 | `ALPACA_TRADING_URL` | `https://paper-api.alpaca.markets` | Clock and asset lookup. Use `https://api.alpaca.markets` with live-account keys. A trailing `/v2` (as shown in Alpaca's dashboard) is fine |
 | `LLM_PROVIDER` | `claude-cli` | `claude-cli` (your Claude Code CLI + subscription) or `none` |
-| `CLAUDE_CLI_PATH`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT_MS` | `claude`, CLI default, `180000` | Where the CLI is, the default model (the panel's model picker overrides it), how long to wait |
+| `CLAUDE_CLI_PATH`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT_MS` | `claude`, CLI default, `180000` | Where the CLI is, the default model (the panel's model picker overrides it), how long a Claude call may take by default (the AI outlook always allows 5 minutes for web research) |
 | `MOCK_SEED`, `MOCK_TICK_MS` | `42`, `1000` | Mock provider seed and tick interval |
 | `POSTGRES_*`, `APP_PORT` | see `.env.example` | Docker Compose settings |
 

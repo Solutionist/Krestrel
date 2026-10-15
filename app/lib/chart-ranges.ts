@@ -80,3 +80,48 @@ export function rangeStart(range: RangeKey, candles: readonly Candle[]): number 
   const first = candles.find((candle) => nyDay(candle.time * 1000) >= fromDay);
   return first?.time ?? last.time;
 }
+
+/** How each interval's period reads in sentences ("Covers the last 5 sessions"). */
+export const PERIOD_NAMES: Record<RangeKey, string> = {
+  "1D": "the last session",
+  "5D": "the last 5 sessions",
+  "1M": "the last month",
+  "3M": "the last 3 months",
+  "6M": "the last 6 months",
+  YTD: "this year so far",
+  "1Y": "the last year",
+  "5Y": "the last 5 years",
+  All: "all history",
+};
+
+/**
+ * Trading styles for Insights. Each picks a chart interval; insights then cover that interval's
+ * period (INTERVAL_RANGE), so a day trader sees intraday swings and a long-term investor sees
+ * multi-year ones, on the same chart that draws the markers.
+ */
+export const HORIZONS = ["day", "swing", "position", "long"] as const;
+export type Horizon = (typeof HORIZONS)[number];
+
+export const HORIZON_INTERVAL: Record<Horizon, Timeframe> = {
+  day: "5m",
+  swing: "1h",
+  position: "1D",
+  long: "1W",
+};
+
+export const HORIZON_LABELS: Record<Horizon, string> = {
+  day: "Day trade",
+  swing: "Swing",
+  position: "Position",
+  long: "Long term",
+};
+
+/** Most candles analysed at once (keeps analysis well under a frame and the prompt small). */
+export const MAX_ANALYSIS_CANDLES = 6000;
+
+/** The candles Insights and AI analysis look at: the interval's period, newest last. */
+export function analysisWindow(candles: readonly Candle[], timeframe: Timeframe): Candle[] {
+  const from = rangeStart(INTERVAL_RANGE[timeframe], candles);
+  const start = from === null ? 0 : candles.findIndex((candle) => candle.time >= from);
+  return candles.slice(Math.max(start, 0)).slice(-MAX_ANALYSIS_CANDLES);
+}

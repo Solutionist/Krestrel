@@ -222,3 +222,54 @@ export function portfolioTotals(positions: readonly ValuedPosition[]): Portfolio
     unpriced,
   };
 }
+
+export type AveragePlan =
+  | {
+      ok: true;
+      /** Exact shares to buy (fractional brokers). */
+      shares: number;
+      /** Whole shares that reach the target (rounded so the average is at least as good). */
+      wholeShares: number;
+      /** Cost of `shares` incl. fee, and of `wholeShares` incl. fee. */
+      cost: number;
+      wholeCost: number;
+      /** Average after buying `wholeShares`. */
+      wholeAverage: number;
+      totalShares: number;
+    }
+  | { ok: false; reason: "invalid" | "already" | "unreachable" };
+
+/**
+ * Shares to buy at `price` so the average cost becomes `target` (works for averaging down and
+ * up): solves (held × average + n × price + fee) / (held + n) = target for n. Reachable only
+ * when the target lies strictly between the buy price and the current average.
+ */
+export function sharesToReachAverage(input: {
+  held: number;
+  average: number;
+  price: number;
+  target: number;
+  fee?: number;
+}): AveragePlan {
+  const { held, average, price, target, fee = 0 } = input;
+  const values = [held, average, price, target, fee];
+  if (values.some((v) => !Number.isFinite(v) || v < 0) || held <= 0 || price <= 0 || target <= 0) {
+    return { ok: false, reason: "invalid" };
+  }
+  if (Math.abs(average - target) < 1e-9) return { ok: false, reason: "already" };
+  const down = target < average;
+  if (down ? !(price < target) : !(price > target)) return { ok: false, reason: "unreachable" };
+  const shares = (held * (average - target) + fee) / (target - price);
+  if (!(shares > 0)) return { ok: false, reason: "unreachable" };
+  const wholeShares = Math.ceil(shares - 1e-9);
+  const wholeCost = wholeShares * price + fee;
+  return {
+    ok: true,
+    shares,
+    wholeShares,
+    cost: shares * price + fee,
+    wholeCost,
+    wholeAverage: (held * average + wholeCost) / (held + wholeShares),
+    totalShares: held + shares,
+  };
+}

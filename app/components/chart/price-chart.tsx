@@ -43,7 +43,6 @@ import { createStoredValue } from "~/hooks/stored-value";
 import type { LiveListener } from "~/hooks/use-market-stream";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
 import { type Analysis, analyzeChart, type Trade } from "~/lib/analysis";
-import { ExplainResponseSchema } from "~/lib/analysis-explanation";
 import {
   formatExchangeDate,
   formatExchangeDateTime,
@@ -55,7 +54,8 @@ import {
   mergeBar,
   mergeTick,
 } from "~/lib/candles";
-import { INTERVAL_RANGE, rangeStart } from "~/lib/chart-ranges";
+import { analysisWindow, INTERVAL_RANGE, rangeStart } from "~/lib/chart-ranges";
+import { captureWindow, windowToLogical } from "~/lib/chart-view";
 import { formatChange, formatPercentChange, formatPrice } from "~/lib/format";
 import {
   bollinger,
@@ -67,15 +67,17 @@ import {
   rsi,
 } from "~/lib/indicators";
 import { type Candle, CandleSchema, isCalendarTimeframe, type Timeframe } from "~/lib/market";
+import { OutlookResponseSchema } from "~/lib/outlook";
 import { type RangeStats, rangeStats } from "~/lib/range-stats";
 import { rsiSignal, SIGNAL_GLYPH, SIGNAL_LABEL } from "~/lib/rsi-signal";
 import { type TradeContext, tradeContexts } from "~/lib/trade-context";
+import { buildTradePlan, type TradePlan } from "~/lib/trade-plan";
 import { IconButton, ToggleChip } from "../ui/button";
 import { ChartLegend, createLegendStore, type LegendIndicator } from "./chart-legend";
 import { type ChartTheme, readChartTheme } from "./chart-theme";
 import { ChartToolbar, OVERLAYS, type Overlay } from "./chart-toolbar";
-import { ClaudePanel, type ClaudeState, claudeModel } from "./claude-panel";
 import { InsightsPanel } from "./insights-panel";
+import { claudeModel, OutlookPanel, type OutlookState } from "./outlook-panel";
 import { createRsiPane, type RsiPane } from "./rsi-pane";
 import { usePersistedSet } from "./use-persisted-set";
 
@@ -97,15 +99,18 @@ const RSI_PANE = 1;
 const RIGHT_OFFSET_BARS = 6;
 /** Zoom-in limit for the buttons/keys. */
 const MIN_VISIBLE_BARS = 10;
+/** Fewest candles shown when a kept view lands on a coarser interval (e.g. 2 hours → weekly). */
+const MIN_KEPT_BARS = 20;
 /** "Previous view" steps kept. */
 const MAX_VIEW_HISTORY = 20;
 /** Load older history when the view gets within this many bars of the first loaded candle. */
 const LOAD_OLDER_WITHIN_BARS = 20;
-const MAX_ANALYSIS_CANDLES = 6000;
 
 const INDICATOR_STORAGE_KEY = "krestrel.indicators";
 const OVERLAY_STORAGE_KEY = "krestrel.overlays";
 const CLAUDE_CONSENT_KEY = "krestrel.claudeConsent";
+/** OutlookRequestSchema's minimum: fewer candles can't carry levels or a trend. */
+const MIN_OUTLOOK_CANDLES = 20;
 
 /** Colour token per indicator (app.css). */
 const INDICATOR_TOKEN: Record<IndicatorId, string> = {
@@ -181,23 +186,26 @@ export function PriceChart({
   /** Views to return to with "Previous view" (logical ranges; reset when the data reloads). */
   const viewHistory = useRef<{ from: number; to: number }[]>([]);
   const [canGoBack, setCanGoBack] = useState(false);
+  /** Set by a trading-style pick: the next load shows the style's period, not the kept view. */
+  const resetViewRef = useRef(false);
 
   const [indicators, toggleIndicator] = usePersistedSet<IndicatorId>(
     INDICATOR_STORAGE_KEY,
     INDICATORS,
   );
-  const [overlays, toggleOverlay, addOverlays] = usePersistedSet<Overlay>(
-    OVERLAY_STORAGE_KEY,
-    OVERLAYS,
-  );
+  const [overlays, toggleOverlay] = usePersistedSet<Overlay>(OVERLAY_STORAGE_KEY, OVERLAYS);
   const [sidePanel, setSidePanel] = sidePanelSetting.use();
   const [model] = claudeModel.use();
   const togglePanel = (panel: Exclude<SidePanel, "none">) =>
     setSidePanel(sidePanel === panel ? "none" : panel);
-  const [analysis, setAnalysis] = useState<{ analysis: Analysis; contexts: TradeContext[] } | null>(
-    null,
-  );
-  const [claude, setClaude] = useState<ClaudeState>({ kind: "idle" });
+  const [analysis, setAnalysis] = useState<{
+    analysis: Analysis;
+    contexts: TradeContext[];
+    plan: TradePlan | null;
+  } | null>(null);
+  const [outlook, setOutlook] = useState<OutlookState>({ kind: "idle" });
+  /** Bumped per request and on symbol/interval change, so a late answer can't land elsewhere. */
+  const outlookRequest = useRef(0);
 
   const legend = useMemo(createLegendStore, []);
   const indicatorSeries = useRef(new Map<IndicatorId, ISeriesApi<"Line">[]>());
@@ -205,6 +213,7 @@ export function PriceChart({
   const indicatorValues = useRef(new Map<IndicatorId, IndicatorValue[][]>());
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const levelLinesRef = useRef<IPriceLine[]>([]);
+  const planLinesRef = useRef<IPriceLine[]>([]);
   const trendSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const overlaysRef = useRef(overlays);
   const indicatorsRef = useRef(indicators);
@@ -363,6 +372,7 @@ export function PriceChart({
       chartRef.current = null;
       markersRef.current = null;
       levelLinesRef.current = [];
+      planLinesRef.current = [];
       trendSeriesRef.current = null;
       indicatorSeries.current.clear();
       rsiPaneRef.current = null;
@@ -472,10 +482,11 @@ export function PriceChart({
     updateLegend();
   }, [levels, renderIndicators, updateLegend]);
 
-  // ── Hindsight analysis overlays (ADR 0012) ─────────────────────────────────────────────────
+  // ── Analysis overlays (ADR 0012, 0016) ───────────────────────────────────────────────────────
   /**
    * Analyses the drawn candles (on load, each new candle, toggles, before asking Claude), feeds
-   * the insights panel, and draws markers/levels/trend line when those overlays are on.
+   * the insights panel (hindsight swings and the forward plan), and draws markers/levels/trend line
+   * when those overlays are on.
    */
   const renderAnalysis = useCallback(() => {
     const parts = chartRef.current;
@@ -487,14 +498,19 @@ export function PriceChart({
     trendSeriesRef.current = null;
     markersRef.current ??= createSeriesMarkers(candles, []);
 
-    const data = dataRef.current.slice(-MAX_ANALYSIS_CANDLES);
+    // Only the interval's period (e.g. 1D → last year), whatever older history is loaded.
+    const data = analysisWindow(dataRef.current, timeframeRef.current);
     if (data.length === 0) {
       markersRef.current.setMarkers([]);
       setAnalysis(null);
       return;
     }
     const result = analyzeChart(data);
-    setAnalysis({ analysis: result, contexts: tradeContexts(data, result) });
+    setAnalysis({
+      analysis: result,
+      contexts: tradeContexts(data, result),
+      plan: buildTradePlan(data, result),
+    });
 
     const active = overlaysRef.current;
     markersRef.current.setMarkers(
@@ -559,6 +575,50 @@ export function PriceChart({
     renderAnalysis();
   }, [overlays, renderAnalysis]);
 
+  // Plan overlay: Claude's levels once an outlook for this symbol + interval has them, otherwise
+  // the local plan. Redrawn when either changes (the local plan moves with each new candle).
+  useEffect(() => {
+    const parts = chartRef.current;
+    if (!parts) return;
+    const { candles, theme } = parts;
+    for (const line of planLinesRef.current) candles.removePriceLine(line);
+    planLinesRef.current = [];
+    if (!overlays.has("plan")) return;
+
+    const ai = outlook.kind === "done" ? outlook.result.outlook.plan : null;
+    const aiBuy = ai ? [ai.buyLow, ai.buyHigh].filter((price) => price !== null) : [];
+    const local = analysis?.plan ?? null;
+    const levels =
+      ai && (aiBuy.length > 0 || ai.stop !== null || ai.targets.length > 0)
+        ? { buy: aiBuy, stop: ai.stop, targets: ai.targets }
+        : local
+          ? {
+              buy: local.buyZone ? [local.buyZone.low, local.buyZone.high] : [],
+              stop: local.stop?.price ?? null,
+              targets: local.targets.map((target) => target.price),
+            }
+          : null;
+    if (!levels) return;
+
+    const line = (price: number, color: string, lineStyle: LineStyle, title: string) =>
+      planLinesRef.current.push(
+        candles.createPriceLine({
+          price,
+          color,
+          lineWidth: 1,
+          lineStyle,
+          axisLabelVisible: true,
+          title,
+        }),
+      );
+    for (const price of levels.buy)
+      line(price, theme.line("--color-accent"), LineStyle.Dashed, "Buy");
+    if (levels.stop !== null) line(levels.stop, theme.fall, LineStyle.Dotted, "Stop");
+    levels.targets.forEach((price, index) => {
+      line(price, theme.rise, LineStyle.Dotted, `T${index + 1}`);
+    });
+  }, [overlays, outlook, analysis]);
+
   // ── View: presets, zoom, focus ───────────────────────────────────────────────────────────
   /** Zooms to the interval's default period (INTERVAL_RANGE), or all candles if shorter. */
   const applyView = useCallback(() => {
@@ -573,10 +633,18 @@ export function PriceChart({
         .setVisibleRange({ from: from as UTCTimestamp, to: last.time as UTCTimestamp });
   }, []);
 
-  /** Picks the interval; its default period is applied when the data lands (or now, if same). */
+  /** Interval buttons: switch candle size but keep looking at the same stretch of time. */
   function selectInterval(tf: Timeframe) {
-    if (tf === timeframe) applyView();
-    else setTimeframe(tf);
+    if (tf !== timeframe) setTimeframe(tf);
+  }
+
+  /** Insights trading styles: switch interval and show that style's whole period. */
+  function selectStyle(tf: Timeframe) {
+    resetViewRef.current = true;
+    if (tf === timeframe) {
+      resetViewRef.current = false;
+      applyView();
+    } else setTimeframe(tf);
   }
 
   /**
@@ -858,6 +926,12 @@ export function PriceChart({
     viewHistory.current = [];
     setCanGoBack(false);
     setLoad({ kind: "loading" });
+    // Remember what the user is looking at, so the new candles (another interval, or freshly
+    // downloaded history) show the same stretch of time instead of a reset zoom.
+    const visible = chart.timeScale().getVisibleLogicalRange();
+    const keep = resetViewRef.current || !visible ? null : captureWindow(dataRef.current, visible);
+    resetViewRef.current = false;
+
     fetchCandles("")
       .then((data) => {
         dataRef.current = [...data];
@@ -865,7 +939,14 @@ export function PriceChart({
         drawAll();
         ready = true;
         for (const event of queued.splice(0)) fold(event);
-        applyView();
+        const kept = keep
+          ? windowToLogical(data, keep, {
+              minBars: MIN_KEPT_BARS,
+              rightOffset: RIGHT_OFFSET_BARS,
+            })
+          : null;
+        if (kept) chart.timeScale().setVisibleLogicalRange(kept);
+        else applyView();
         setLoad({ kind: "ready", empty: data.length === 0 });
       })
       .catch((error: unknown) => {
@@ -893,46 +974,54 @@ export function PriceChart({
     updateLegend,
   ]);
 
-  // Claude's notes belong to one symbol + interval.
+  // An outlook belongs to one symbol + interval.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset trigger only.
   useEffect(() => {
-    setClaude({ kind: "idle" });
+    outlookRequest.current += 1;
+    setOutlook({ kind: "idle" });
   }, [symbol, timeframe]);
 
-  // ── AI analysis by Claude (ADR 0012) ──────────────────────────────────────────────────────────────────
-  async function askClaude() {
+  // ── AI outlook by Claude (ADR 0016) ──────────────────────────────────────────────────────────
+  async function getOutlook() {
     if (localStorage.getItem(CLAUDE_CONSENT_KEY) !== "yes") {
       const ok = window.confirm(
-        `AI analysis sends ${symbol}'s ${timeframe} price candles (no keys or account data) to Anthropic through your own Claude Code CLI and Claude subscription. Continue?`,
+        `AI outlook sends the ticker (${symbol}), this chart's ${timeframe} prices and recent headlines (no keys or account data) to Anthropic through your own Claude Code CLI and Claude subscription. Claude also searches the web for news and analyst ratings. Continue?`,
       );
       if (!ok) return;
       localStorage.setItem(CLAUDE_CONSENT_KEY, "yes");
     }
-    // Analyse and draw one snapshot, so Claude's ids and prices match the chart exactly.
-    const snapshot = dataRef.current.slice(-MAX_ANALYSIS_CANDLES);
+    // The candles Insights analyses, so Claude's levels and the local plan agree.
+    const candles = analysisWindow(dataRef.current, timeframe);
     renderAnalysis();
-    addOverlays(["trades", "levels"]);
-    setSidePanel("claude");
-    setClaude({ kind: "loading" });
+    setSidePanel("outlook");
+    if (candles.length < MIN_OUTLOOK_CANDLES) {
+      setOutlook({ kind: "error", message: "Not enough history on this interval yet." });
+      return;
+    }
+    const request = ++outlookRequest.current;
+    setOutlook({ kind: "loading" });
+    let next: OutlookState;
     try {
-      const response = await fetch(`/api/analysis/${encodeURIComponent(symbol)}`, {
+      const response = await fetch(`/api/outlook/${encodeURIComponent(symbol)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ timeframe, candles: snapshot, model }),
+        body: JSON.stringify({ timeframe, candles, model }),
       });
-      const parsed = ExplainResponseSchema.safeParse(await response.json());
-      if (!parsed.success)
-        setClaude({ kind: "error", message: "The analysis came back in an unexpected format." });
-      else if (!parsed.data.ok) setClaude({ kind: "error", message: parsed.data.error.message });
-      else setClaude({ kind: "done", result: parsed.data });
+      const parsed = OutlookResponseSchema.safeParse(await response.json());
+      next = !parsed.success
+        ? { kind: "error", message: "The outlook came back in an unexpected format." }
+        : parsed.data.ok
+          ? { kind: "done", result: parsed.data }
+          : { kind: "error", message: parsed.data.error.message };
     } catch {
-      setClaude({ kind: "error", message: "Couldn't reach the Krestrel server." });
+      next = { kind: "error", message: "Couldn't reach the Krestrel server." };
     }
+    if (request === outlookRequest.current) setOutlook(next);
   }
 
   // ── Layout ───────────────────────────────────────────────────────────────────────────────
   return (
-    // Toolbar spans the card; the chart and the side column (Claude or Insights) share the row beneath.
+    // Toolbar spans the card; the chart and the side column (outlook or Insights) share the row beneath.
     <div className="flex min-h-0 flex-1 flex-col">
       <ChartToolbar
         timeframe={timeframe}
@@ -1061,19 +1150,26 @@ export function PriceChart({
           <InsightsPanel
             analysis={analysis?.analysis ?? null}
             contexts={analysis?.contexts ?? []}
+            plan={analysis?.plan ?? null}
             timeframe={timeframe}
-            onOpenClaude={() => setSidePanel("claude")}
+            planShown={overlays.has("plan")}
+            onTogglePlan={() => toggleOverlay("plan")}
+            onOpenOutlook={() => setSidePanel("outlook")}
+            onInterval={selectStyle}
             onFocusTrade={focusTrade}
             onClose={() => setSidePanel("none")}
           />
         )}
-        {sidePanel === "claude" && (
-          <ClaudePanel
-            analysis={analysis?.analysis ?? null}
+        {sidePanel === "outlook" && (
+          <OutlookPanel
             symbol={symbol}
-            claude={claude}
-            onAsk={() => void askClaude()}
-            onFocusTrade={focusTrade}
+            timeframe={timeframe}
+            outlook={outlook}
+            lastPrice={analysis?.plan?.lastPrice ?? null}
+            canAsk={analysis !== null}
+            planShown={overlays.has("plan")}
+            onAsk={() => void getOutlook()}
+            onTogglePlan={() => toggleOverlay("plan")}
             onClose={() => setSidePanel("none")}
           />
         )}
@@ -1082,13 +1178,13 @@ export function PriceChart({
   );
 }
 
-const SIDE_PANELS = ["claude", "insights", "none"] as const;
+const SIDE_PANELS = ["outlook", "insights", "none"] as const;
 type SidePanel = (typeof SIDE_PANELS)[number];
 
 /** Which column sits beside the chart: one at a time, so the chart keeps its width. */
 const sidePanelSetting = createStoredValue<SidePanel>(
   "krestrel.sidePanel",
-  "claude",
+  "outlook",
   (raw) => SIDE_PANELS.find((panel) => panel === raw) ?? null,
   (panel) => panel,
 );

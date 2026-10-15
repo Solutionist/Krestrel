@@ -2,7 +2,14 @@
 // ai/market-data.md. One stream connection only: a second one gets error 406.
 import * as z from "zod";
 
-import type { Asset, BarSource, ConnectionStatus, MarketClock, QuoteSnapshot } from "~/lib/market";
+import type {
+  Asset,
+  BarSource,
+  ConnectionStatus,
+  MarketClock,
+  NewsItem,
+  QuoteSnapshot,
+} from "~/lib/market";
 
 import { backoffDelay } from "../backoff";
 import type { MarketDataProvider, ProviderContext, ProviderHandlers } from "../provider";
@@ -10,6 +17,7 @@ import { parseAlpacaConfig } from "./config";
 import {
   assetToAsset,
   clockToMarketClock,
+  newsToNewsItem,
   snapshotToQuote,
   toBar,
   toDailyBar,
@@ -20,6 +28,7 @@ import {
   AssetResponseSchema,
   BarsPageSchema,
   ClockResponseSchema,
+  NewsResponseSchema,
   parseStreamFrame,
   SnapshotsResponseSchema,
   type StreamMessage,
@@ -499,6 +508,19 @@ export function createAlpacaProvider(
       }
       if (skipped > 0) log.warn({ skipped }, "ignored malformed entries in alpaca asset list");
       return assets;
+    },
+
+    async getNews(symbol: string, since: Date, limit: number): Promise<NewsItem[]> {
+      const url = new URL(`${config.dataUrl}/v1beta1/news`);
+      url.search = new URLSearchParams({
+        symbols: symbol,
+        start: since.toISOString(),
+        limit: String(limit),
+        sort: "desc",
+        include_content: "false",
+      }).toString();
+      const body = await readBody(await send(url), NewsResponseSchema, "news");
+      return body.news.map(newsToNewsItem);
     },
   };
 }

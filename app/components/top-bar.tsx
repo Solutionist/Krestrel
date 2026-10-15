@@ -2,6 +2,7 @@ import {
   CaretDownIcon,
   ChartLineUpIcon,
   DesktopIcon,
+  LightbulbIcon,
   MoonIcon,
   SunIcon,
   WalletIcon,
@@ -23,6 +24,7 @@ const TONE_DOT: Record<ConnectionText["tone"], string> = {
 
 const NAV = [
   { to: "/", label: "Markets", Icon: ChartLineUpIcon },
+  { to: "/ideas", label: "Ideas", Icon: LightbulbIcon },
   { to: "/portfolio", label: "Portfolio", Icon: WalletIcon },
 ] as const;
 

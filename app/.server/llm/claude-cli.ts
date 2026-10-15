@@ -148,13 +148,17 @@ export function createClaudeCliClient(
       if (inFlight)
         throw new LlmError(
           "busy",
-          "Claude is already working on an analysis. Wait for it to finish.",
+          "Claude is already working on a request. Wait for it to finish.",
         );
       inFlight = true;
       try {
         mkdirSync(scratchDir, { recursive: true });
         // A per-request choice (the owner's model picker) wins over CLAUDE_MODEL.
         const model = request.model ?? config.CLAUDE_MODEL;
+        const timeoutMs = request.timeoutMs ?? config.CLAUDE_TIMEOUT_MS;
+        // Only the tools this request names: available (--tools) and pre-approved for headless
+        // use (--allowedTools). Without any, a pure text-in, JSON-out call.
+        const tools = (request.tools ?? []).join(",");
         const args = [
           "-p",
           "--output-format",
@@ -163,9 +167,10 @@ export function createClaudeCliClient(
           JSON.stringify(cliJsonSchema(request.schema)),
           "--system-prompt",
           request.system,
-          // No tools, MCP servers, skills, or saved session: a pure text-in, JSON-out call.
+          // No MCP servers, skills, or saved session beyond the requested built-in tools.
           "--tools",
-          "",
+          tools,
+          ...(tools ? ["--allowedTools", tools] : []),
           "--strict-mcp-config",
           "--disable-slash-commands",
           "--no-session-persistence",
@@ -181,10 +186,15 @@ export function createClaudeCliClient(
           stdin: request.prompt,
           cwd: scratchDir,
           env,
-          timeoutMs: config.CLAUDE_TIMEOUT_MS,
+          timeoutMs,
         });
         log.info(
-          { ms: Date.now() - started, exit: result.code, timedOut: result.timedOut },
+          {
+            ms: Date.now() - started,
+            exit: result.code,
+            timedOut: result.timedOut,
+            tools: tools || null,
+          },
           "claude run finished",
         );
 
@@ -199,7 +209,7 @@ export function createClaudeCliClient(
         if (result.timedOut) {
           throw new LlmError(
             "timeout",
-            `Claude took longer than ${Math.round(config.CLAUDE_TIMEOUT_MS / 1000)} s. Try a shorter range.`,
+            `Claude took longer than ${Math.round(timeoutMs / 1000)} s. Try again, or pick a faster model.`,
           );
         }
 

@@ -202,3 +202,21 @@ export type AlpacaAsset = z.infer<typeof AssetResponseSchema>;
  * odd entry in ~11k cannot fail the whole listing.
  */
 export const AssetListResponseSchema = z.array(z.unknown());
+
+const NewsArticleSchema = z.object({
+  id: z.number().int(),
+  headline: z.string(),
+  summary: z.string().nullish(),
+  source: z.string().nullish(),
+  /** Empty string when the article has no public page. */
+  url: z.string().nullish(),
+  created_at: Timestamp,
+  symbols: z.array(z.string()).optional(),
+});
+export type NewsArticle = z.infer<typeof NewsArticleSchema>;
+
+/** GET /v1beta1/news (Benzinga headlines; verified against a live response). */
+export const NewsResponseSchema = z.object({
+  news: z.array(NewsArticleSchema),
+  next_page_token: z.string().nullish(),
+});

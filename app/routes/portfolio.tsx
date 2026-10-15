@@ -6,6 +6,7 @@ import { db } from "~/.server/market/db/instance";
 import { listPortfolios, listTrades } from "~/.server/market/db/queries/portfolios";
 import { getMarketHub } from "~/.server/market/instance";
 import { AppShell } from "~/components/app-shell";
+import { AverageCalculator } from "~/components/portfolio/average-calculator";
 import { ChangePill, HoldingsTable } from "~/components/portfolio/holdings-table";
 import { type PortfolioEntry, PortfolioList } from "~/components/portfolio/portfolio-list";
 import { TradeForm } from "~/components/portfolio/trade-form";
@@ -177,6 +178,8 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
                 />
               )}
             </section>
+
+            <AverageCalculator positions={positions} quotes={state.quotes} display={display} />
 
             <section aria-labelledby="trades-heading" className="grid gap-3">
               <h2 id="trades-heading" className={HEADING}>

@@ -2,6 +2,9 @@
 // chosen by LLM_PROVIDER; callers only see structured, Zod-validated results.
 import type * as z from "zod";
 
+/** Built-in tools a request may let the model use; everything else stays off. */
+export type LlmTool = "WebSearch" | "WebFetch";
+
 export interface StructuredRequest<T extends z.ZodType> {
   /** Replaces the backend's default system prompt. */
   system: string;
@@ -10,6 +13,10 @@ export interface StructuredRequest<T extends z.ZodType> {
   schema: T;
   /** Model alias or full name for this call; the backend's configured default when omitted. */
   model?: string;
+  /** Tools the model may use for this call; none when omitted. */
+  tools?: readonly LlmTool[];
+  /** Overrides the backend's default timeout for this call. */
+  timeoutMs?: number;
 }
 
 export interface StructuredResult<T> {

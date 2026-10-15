@@ -1,7 +1,7 @@
 import pino from "pino";
 import { describe, expect, it, vi } from "vitest";
 
-import type { Asset, Bar, QuoteSnapshot } from "~/lib/market";
+import type { Asset, Bar, NewsItem, QuoteSnapshot } from "~/lib/market";
 import type { StreamEvent } from "~/lib/stream-events";
 
 import { setupTestDatabase } from "../../../tests/db/test-db";
@@ -66,6 +66,7 @@ function fakeProvider(overrides: Partial<MarketDataProvider> = {}) {
       { symbol: "AAPL", name: "Apple Inc.", exchange: "NASDAQ" },
       { symbol: "AMD", name: "Advanced Micro Devices, Inc.", exchange: "NASDAQ" },
     ],
+    getNews: async (): Promise<NewsItem[]> => [],
     ...overrides,
   };
   const live = () => {
@@ -243,5 +244,60 @@ describe("MarketHub live data", () => {
       liveSource: "fake_live",
     });
     expect(candles.map((candle) => candle.close)).toEqual([51]);
+  });
+});
+
+describe("MarketHub news", () => {
+  const hubFor = (provider: MarketDataProvider) =>
+    new MarketHub({
+      provider,
+      db,
+      logger: pino({ level: "silent" }),
+      backfillDays: 1,
+      dailyHistoryYears: 1,
+      now: () => NOW,
+    });
+
+  it("asks the provider for the last 30 days, at most 20 headlines", async () => {
+    const getNews = vi.fn<MarketDataProvider["getNews"]>(async () => []);
+    const { provider } = fakeProvider({ getNews });
+    await hubFor(provider).getNews("AAPL");
+    expect(getNews).toHaveBeenCalledWith("AAPL", new Date(NOW - 30 * 24 * 60 * MINUTE), 20);
+  });
+
+  it("returns no headlines instead of failing when the feed is down", async () => {
+    const { provider } = fakeProvider({
+      getNews: async () => {
+        throw new Error("HTTP 500");
+      },
+    });
+    await expect(hubFor(provider).getNews("AAPL")).resolves.toEqual([]);
+  });
+});
+
+describe("MarketHub lookups for ideas", () => {
+  it("finds an exact ticker in the listing, never a prefix match", async () => {
+    const { provider } = fakeProvider();
+    const { hub } = await startedHub(provider);
+    await expect(hub.findAsset("amd")).resolves.toEqual({
+      symbol: "AMD",
+      name: "Advanced Micro Devices, Inc.",
+      exchange: "NASDAQ",
+    });
+    await expect(hub.findAsset("AA")).resolves.toBeNull();
+    expect(hub.snapshot().watchlist).toEqual([]);
+    await hub.stop();
+  });
+
+  it("quotes symbols without subscribing them, and yields no quotes when the provider fails", async () => {
+    const { provider, subscribed } = fakeProvider();
+    const { hub } = await startedHub(provider);
+    const quotes = await hub.getQuotes(["JNJ", "XOM", "JNJ"]);
+    expect([...quotes.keys()]).toEqual(["JNJ", "XOM"]);
+    expect(subscribed.size).toBe(0);
+
+    vi.spyOn(provider, "getSnapshots").mockRejectedValueOnce(new Error("HTTP 500"));
+    await expect(hub.getQuotes(["JNJ"])).resolves.toEqual(new Map());
+    await hub.stop();
   });
 });

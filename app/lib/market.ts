@@ -139,3 +139,16 @@ export const AssetSchema = z.object({
   exchange: z.string(),
 });
 export type Asset = z.infer<typeof AssetSchema>;
+
+/** A headline from the market-data provider's news feed (newest first when listed). */
+export const NewsItemSchema = z.object({
+  id: z.string(),
+  headline: z.string(),
+  summary: z.string(),
+  /** Publisher or wire, e.g. "benzinga". */
+  source: z.string(),
+  url: z.string().nullable(),
+  /** ISO 8601 publication time. */
+  createdAt: z.iso.datetime(),
+});
+export type NewsItem = z.infer<typeof NewsItemSchema>;

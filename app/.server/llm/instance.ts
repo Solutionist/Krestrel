@@ -7,7 +7,7 @@ import { createClaudeCliClient } from "./claude-cli";
 import { type LlmClient, LlmError } from "./types";
 
 const LlmConfigSchema = z.object({
-  /** `claude-cli` (default) or `none` to turn the "Ask Claude" feature off. */
+  /** `claude-cli` (default) or `none` to turn the AI outlook off. */
   LLM_PROVIDER: z.string().default("claude-cli"),
 });
 
@@ -20,10 +20,10 @@ const BACKENDS: Record<
 
 const disabled: LlmClient = {
   id: "none",
-  displayName: "AI analysis (disabled)",
+  displayName: "AI outlook (disabled)",
   generateStructured() {
     return Promise.reject(
-      new LlmError("disabled", "AI analysis is turned off (LLM_PROVIDER=none)."),
+      new LlmError("disabled", "The AI outlook is turned off (LLM_PROVIDER=none)."),
     );
   },
 };
@@ -36,7 +36,7 @@ let cached: LlmClient | undefined;
 /** The configured LLM backend. */
 export function getLlm(): LlmClient {
   if (cached) return cached;
-  const { LLM_PROVIDER } = parseConfig(LlmConfigSchema, process.env, "AI analysis");
+  const { LLM_PROVIDER } = parseConfig(LlmConfigSchema, process.env, "AI outlook");
   let client: LlmClient;
   if (LLM_PROVIDER === "none") client = disabled;
   else {

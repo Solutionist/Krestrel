@@ -5,6 +5,7 @@ import {
   mergePositions,
   type Position,
   portfolioTotals,
+  sharesToReachAverage,
   type Trade,
   type TradeSide,
   valuePosition,
@@ -154,6 +155,48 @@ describe("valuation", () => {
       costBasis: 7000,
       averageCost: 175,
       realized: 4,
+    });
+  });
+});
+
+describe("sharesToReachAverage", () => {
+  it("solves the owner's example: 50 @ 150, buy at 80 to average 120", () => {
+    const plan = sharesToReachAverage({ held: 50, average: 150, price: 80, target: 120 });
+    expect(plan).toMatchObject({
+      ok: true,
+      shares: 37.5,
+      wholeShares: 38,
+      cost: 3000,
+      wholeCost: 3040,
+    });
+    if (plan.ok) expect(plan.wholeAverage).toBeLessThanOrEqual(120);
+  });
+
+  it("includes the fee and works for averaging up", () => {
+    const withFee = sharesToReachAverage({
+      held: 50,
+      average: 150,
+      price: 80,
+      target: 120,
+      fee: 4,
+    });
+    expect(withFee.ok && withFee.shares).toBeCloseTo(37.6);
+    const up = sharesToReachAverage({ held: 10, average: 100, price: 200, target: 150 });
+    expect(up).toMatchObject({ ok: true, shares: 10, wholeShares: 10 });
+  });
+
+  it("explains when the target can't be reached at that price", () => {
+    expect(sharesToReachAverage({ held: 50, average: 150, price: 130, target: 120 })).toEqual({
+      ok: false,
+      reason: "unreachable",
+    });
+    expect(sharesToReachAverage({ held: 50, average: 150, price: 80, target: 150 })).toEqual({
+      ok: false,
+      reason: "already",
+    });
+    expect(sharesToReachAverage({ held: 0, average: 150, price: 80, target: 120 })).toEqual({
+      ok: false,
+      reason: "invalid",
     });
   });
 });

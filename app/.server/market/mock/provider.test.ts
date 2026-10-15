@@ -387,3 +387,24 @@ describe("getDailyBars", () => {
     }
   });
 });
+
+describe("getNews", () => {
+  it("serves labelled simulated headlines without links, newest first, within since and limit", async () => {
+    const now = Date.parse("2026-10-14T18:00:00Z");
+    const provider = makeProvider({}, { now: () => now });
+    const all = await provider.getNews("AAPL", new Date(now - 30 * 86_400_000), 20);
+    expect(all.length).toBeGreaterThan(1);
+    for (const item of all) {
+      expect(item).toMatchObject({ source: "mock", url: null });
+      expect(item.headline).toContain("(simulated)");
+    }
+    const times = all.map((item) => Date.parse(item.createdAt));
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+
+    const since = new Date(now - 5 * 86_400_000);
+    const recent = await provider.getNews("AAPL", since, 20);
+    expect(recent.length).toBeLessThan(all.length);
+    expect(recent.every((item) => Date.parse(item.createdAt) >= since.getTime())).toBe(true);
+    await expect(provider.getNews("AAPL", new Date(0), 1)).resolves.toHaveLength(1);
+  });
+});

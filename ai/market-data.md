@@ -1,6 +1,6 @@
 # Market data (Alpaca, free Basic plan)
 
-Sources: docs.alpaca.markets — streaming-market-data, real-time-stock-pricing-data, about-market-data-api, reference/stockbars, stocksnapshots, clock (v2/v3), calendar, assets. Context7 `/websites/alpaca_markets_us`. Verified 2026-10-14.
+Sources: docs.alpaca.markets — streaming-market-data, real-time-stock-pricing-data, about-market-data-api, reference/stockbars, stocksnapshots, clock (v2/v3), calendar, assets, news. Context7 `/websites/alpaca_markets_us`. Verified 2026-10-14.
 
 ## Plan limits
 
@@ -50,6 +50,7 @@ Headers: `APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`.
 |---|---|
 | `GET https://data.alpaca.markets/v2/stocks/bars` | `symbols`, `timeframe=1Min`, `start`, `end`, `limit` ≤ 10000 **across all symbols**, `feed` (**default `sip`**; always pass explicitly), `adjustment=raw`, `sort=asc`, `page_token`. Response `{ bars: { SYM: [{t,o,h,l,c,v,n,vw}] }, next_page_token }`, sorted by symbol then time → always paginate |
 | `GET https://data.alpaca.markets/v2/stocks/snapshots?symbols=…&feed=iex` | **Top-level map** `{ SYM: { latestTrade, latestQuote, minuteBar, dailyBar, prevDailyBar } }`. Previous close = `prevDailyBar.c` |
+| `GET https://data.alpaca.markets/v1beta1/news?symbols=SYM&start=ISO&limit=20&sort=desc&include_content=false` | Benzinga headlines (same keys, free plan). Response `{ news: [{ id (number), headline, summary, source ("benzinga"), url ("" when none), created_at, updated_at, author, symbols, images, content }], next_page_token }` (shape verified live 2026-10-14). Only the first page is read; feeds the AI outlook (ADR 0016) |
 | `GET {trading}/v3/clock?markets=NYSE` | `phase` ∈ `pre|core|lunch|post|closed`, `phase_until` (ADR 0006) |
 | `GET {trading}/v2/assets?status=active&asset_class=us_equity` | Full listing (~11k) for symbol search; entries validated one by one, ineligible ones dropped |
 | `GET {trading}/v2/assets/{symbol}` | Validation on add: `status=active`, `class=us_equity`, `exchange` ∈ NYSE/NASDAQ (+ ARCA/AMEX/BATS/NYSEARCA if allowed), `tradable`. 404 = unknown |
@@ -71,11 +72,12 @@ Headers: `APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`.
 - `config.ts`: owns `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `ALPACA_STREAM_FEED`, `ALPACA_TRADING_URL`, plus optional `ALPACA_DATA_URL`, `ALPACA_STREAM_URL` overrides.
 - `schemas.ts` `parseStreamFrame` never throws: unknown `T` → debug, invalid known `T` → warn.
 - REST calls spaced ≥ 350 ms; HTTP 429 waits for `X-RateLimit-Reset` (≤ 3 retries). Errors never include headers.
-- Tests inject `openSocket` / `fetch` / `now` / `random` / `sleep`. Fixtures in `tests/fixtures/alpaca/` are copied from the docs examples, not live recordings.
+- `getNews` → `NewsItem { id, headline, summary, source, url (http(s) only, else null), createdAt (ISO) }`, newest first. The hub asks for the last 30 days (≤ 20) and returns `[]` on any failure, since news is optional context.
+- Tests inject `openSocket` / `fetch` / `now` / `random` / `sleep`. Fixtures in `tests/fixtures/alpaca/` are copied from the docs examples, not live recordings (`rest-news.json` follows a live response's shape).
 
 ## Provider contract (ADR 0009)
 
-`app/.server/market/provider.ts`. A provider declares capabilities (`id`, `displayName`, `liveDataLabel`, `maxSymbols`, `liveSource`, `historySource`, `historyDelayMs`, `maxSymbolsPerHistoryRequest`) and implements `connect(handlers)`, `disconnect()`, `subscribe`, `unsubscribe`, `getBars` (async-iterable pages), `getDailyBars` (daily history by New York date, ADR 0011), `getSnapshots`, `getClock`, `getAsset`, `listAssets` (full listing for symbol search; the hub caches it for 24 h). Factories receive `{ env, logger }` and validate their own variables with `parseConfig`. They must not import `~/.server/env`, `logger`, or `db`.
+`app/.server/market/provider.ts`. A provider declares capabilities (`id`, `displayName`, `liveDataLabel`, `maxSymbols`, `liveSource`, `historySource`, `historyDelayMs`, `maxSymbolsPerHistoryRequest`) and implements `connect(handlers)`, `disconnect()`, `subscribe`, `unsubscribe`, `getBars` (async-iterable pages), `getDailyBars` (daily history by New York date, ADR 0011), `getSnapshots`, `getClock`, `getAsset`, `listAssets` (full listing for symbol search; the hub caches it for 24 h), `getNews(symbol, since, limit)` (recent headlines, newest first; the mock serves a few labelled simulated ones without links). Factories receive `{ env, logger }` and validate their own variables with `parseConfig`. They must not import `~/.server/env`, `logger`, or `db`.
 
 ## Adding a provider (e.g. Finnhub) — checklist
 

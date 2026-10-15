@@ -3,7 +3,7 @@
 import * as z from "zod";
 
 import { parseConfig } from "~/.server/env-schema";
-import type { Bar, ConnectionStatus, DailyBar, QuoteSnapshot, Tick } from "~/lib/market";
+import type { Bar, ConnectionStatus, DailyBar, NewsItem, QuoteSnapshot, Tick } from "~/lib/market";
 import type { MarketDataProvider, ProviderContext, ProviderHandlers } from "../provider";
 import { MOCK_ASSETS } from "./assets";
 import {
@@ -302,6 +302,29 @@ export function createMockProvider(
 
     async listAssets() {
       return [...MOCK_ASSETS];
+    },
+
+    async getNews(symbol, since, limit) {
+      // Fixed, clearly simulated headlines at fixed ages, so prompts and UI have something to show.
+      const stories = [
+        { days: 1, headline: `${symbol} trades in a narrow range (simulated)` },
+        { days: 4, headline: `${symbol} schedules its quarterly results call (simulated)` },
+        { days: 9, headline: `Analyst note on ${symbol} keeps its rating unchanged (simulated)` },
+      ];
+      const today = Math.floor(now() / DAY_MS) * DAY_MS;
+      return stories
+        .map(
+          ({ days, headline }, index): NewsItem => ({
+            id: `mock-${symbol}-${index}`,
+            headline,
+            summary: "Simulated headline from MARKET_PROVIDER=mock; not real news.",
+            source: "mock",
+            url: null,
+            createdAt: new Date(today - days * DAY_MS + 14 * 60 * MINUTE_MS).toISOString(),
+          }),
+        )
+        .filter((item) => Date.parse(item.createdAt) >= since.getTime())
+        .slice(0, limit);
     },
   };
 }

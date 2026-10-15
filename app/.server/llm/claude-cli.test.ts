@@ -78,6 +78,8 @@ describe("Claude CLI client", () => {
     expect(JSON.parse(schemaArg)).toMatchObject({ type: "object", required: ["answer"] });
     // The CLI rejects a draft 2020-12 `$schema` meta-schema reference (seen against the real CLI).
     expect(JSON.parse(schemaArg)).not.toHaveProperty("$schema");
+    expect(args).not.toContain("--allowedTools");
+    expect(options?.timeoutMs).toBe(180_000);
   });
 
   it("uses the model picked for the request over CLAUDE_MODEL", async () => {
@@ -88,6 +90,23 @@ describe("Claude CLI client", () => {
     const args = run.mock.calls[0]?.[1] ?? [];
     expect(args[args.indexOf("--model") + 1]).toBe("haiku");
     expect(args).not.toContain("opus");
+  });
+
+  it("enables and pre-approves exactly the requested tools, keeping MCP off, with the request's timeout", async () => {
+    const run = vi.fn<RunProcess>(async () =>
+      result({ stdout: JSON.stringify({ structured_output: { answer: 1 } }) }),
+    );
+    await client(run, { CLAUDE_TIMEOUT_MS: "60000" }).generateStructured({
+      ...request,
+      tools: ["WebSearch", "WebFetch"],
+      timeoutMs: 300_000,
+    });
+    const [, args = [], options] = run.mock.calls[0] ?? [];
+    expect(args[args.indexOf("--tools") + 1]).toBe("WebSearch,WebFetch");
+    expect(args[args.indexOf("--allowedTools") + 1]).toBe("WebSearch,WebFetch");
+    expect(args).toContain("--strict-mcp-config");
+    expect(args).not.toContain("--dangerously-skip-permissions");
+    expect(options?.timeoutMs).toBe(300_000);
   });
 
   it("explains how to sign in when the subscription session has expired (CLI exits 0 with is_error)", async () => {

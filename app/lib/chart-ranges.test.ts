@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { rangeStart } from "./chart-ranges";
+import { analysisWindow, rangeStart } from "./chart-ranges";
 import type { Candle } from "./market";
 
 const at = (iso: string): Candle => ({
@@ -61,5 +61,26 @@ describe("rangeStart", () => {
       at("2026-03-31T04:00:00Z"),
     ];
     expect(rangeStart("1M", candles)).toBe(at("2026-03-02T05:00:00Z").time);
+  });
+});
+
+describe("analysisWindow", () => {
+  it("keeps only the interval's period, so older loaded history doesn't leak into Insights", () => {
+    const daily = Array.from({ length: 800 }, (_, i) =>
+      at(new Date(Date.UTC(2024, 0, 2 + i, 5)).toISOString()),
+    );
+    const window = analysisWindow(daily, "1D");
+    const last = daily.at(-1);
+    expect(window.at(-1)).toBe(last);
+    // 1D interval → last year.
+    expect(window.length).toBeGreaterThan(360);
+    expect(window.length).toBeLessThan(370);
+  });
+
+  it("caps very long windows to the newest candles", () => {
+    const minutes = Array.from({ length: 9000 }, (_, i) =>
+      at(new Date(Date.UTC(2026, 9, 13, 13, 30) + i * 60_000).toISOString()),
+    );
+    expect(analysisWindow(minutes, "1M")).toHaveLength(6000);
   });
 });

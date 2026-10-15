@@ -1,4 +1,4 @@
-// Chart candles for a symbol/interval, shared by /api/bars and /api/analysis so both see the
+// Chart candles for a symbol/interval, shared by /api/bars and /api/signals so both see the
 // same data. Intraday intervals come from bars_1m; 1D…1Y from bars_1d + today's minutes (ADR 0011).
 import { type Candle, isCalendarTimeframe, type Timeframe } from "~/lib/market";
 import type { Database } from "./db/client";
