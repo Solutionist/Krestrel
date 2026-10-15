@@ -13,6 +13,7 @@ import { Button } from "~/components/ui/button";
 import { CARD, HEADING } from "~/components/ui/styles";
 import { type MarketState, useMarketStream } from "~/hooks/use-market-stream";
 import { useNow } from "~/hooks/use-now";
+import { useTimeZone } from "~/hooks/use-time-zone";
 import {
   FOCUSES,
   type Focus,
@@ -90,6 +91,7 @@ function saveResults(results: Results) {
 export default function IdeasPage({ loaderData }: Route.ComponentProps) {
   const { state } = useMarketStream(loaderData.snapshot);
   const now = useNow();
+  const timeZone = useTimeZone();
   const [model] = claudeModel.use();
   const [focus, setFocus] = useState<Focus>("diversify");
   const [results, setResults] = useState<Results>({});
@@ -144,7 +146,7 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
     if (id === requestId.current) setRequest(next);
   }
 
-  const market = describeMarket(state.clock);
+  const market = describeMarket(state.clock, timeZone, now);
   const connection = describeConnection(state.link, state.status, now);
 
   return (

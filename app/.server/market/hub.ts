@@ -210,14 +210,40 @@ export class MarketHub {
     return this.#assetsLoading;
   }
 
+  /** Starts loading the listing in the background (e.g. while Claude works), ignoring failure. */
+  warmAssets(): void {
+    this.#assetIndex().catch(() => {
+      // Logged by #assetIndex; verifyListed retries and falls back to per-ticker checks.
+    });
+  }
+
   /**
-   * Exact-ticker lookup in the cached listing (never adds to the watchlist); null when the
-   * provider does not list it. Throws, like search, when no listing could be loaded.
+   * Which `symbols` are listed equities this provider serves, without touching the watchlist:
+   * the asset, or null when not listed. Symbols whose check failed (provider unreachable) are
+   * left out, so callers can keep them rather than throw away minutes of AI work over a network
+   * blip. Uses the cached listing; when it can't load, checks each ticker on its own.
    */
-  async findAsset(symbol: string): Promise<Asset | null> {
-    const upper = symbol.trim().toUpperCase();
-    const [best] = (await this.#assetIndex()).search(upper, 1);
-    return best?.symbol.toUpperCase() === upper ? best : null;
+  async verifyListed(symbols: readonly string[]): Promise<Map<string, Asset | null>> {
+    const unique = [...new Set(symbols.map((symbol) => symbol.trim().toUpperCase()))];
+    const result = new Map<string, Asset | null>();
+    try {
+      const index = await this.#assetIndex();
+      for (const symbol of unique) {
+        const [best] = index.search(symbol, 1);
+        result.set(symbol, best?.symbol.toUpperCase() === symbol ? best : null);
+      }
+      return result;
+    } catch (err) {
+      this.#log.warn({ err }, "asset listing unavailable; checking tickers one by one");
+    }
+    for (const symbol of unique) {
+      try {
+        result.set(symbol, await this.#provider.getAsset(symbol));
+      } catch (err) {
+        this.#log.warn({ err, symbol }, "ticker check failed");
+      }
+    }
+    return result;
   }
 
   /**

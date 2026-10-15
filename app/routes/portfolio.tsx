@@ -19,6 +19,7 @@ import { useMarketStream } from "~/hooks/use-market-stream";
 import { useNow } from "~/hooks/use-now";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
 import { useRsiSignals } from "~/hooks/use-rsi-signals";
+import { useTimeZone } from "~/hooks/use-time-zone";
 import { BASE_CURRENCY, formatMoney } from "~/lib/currency";
 import {
   computePositions,
@@ -54,6 +55,7 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
   );
   const signals = useRsiSignals(state.watchlist, state.quotes, levels, historyStamp);
   const now = useNow();
+  const timeZone = useTimeZone();
   const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState<Trade | null>(null);
 
@@ -127,7 +129,7 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
   );
   const stopEditing = useCallback(() => setEditing(null), []);
 
-  const market = describeMarket(state.clock);
+  const market = describeMarket(state.clock, timeZone, now);
   const connection = describeConnection(state.link, state.status, now);
 
   return (

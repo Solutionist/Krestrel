@@ -276,16 +276,35 @@ describe("MarketHub news", () => {
 });
 
 describe("MarketHub lookups for ideas", () => {
-  it("finds an exact ticker in the listing, never a prefix match", async () => {
+  it("verifies exact tickers against the listing, never by prefix", async () => {
     const { provider } = fakeProvider();
     const { hub } = await startedHub(provider);
-    await expect(hub.findAsset("amd")).resolves.toEqual({
+    const checked = await hub.verifyListed(["amd", "AA"]);
+    expect(checked.get("AMD")).toEqual({
       symbol: "AMD",
       name: "Advanced Micro Devices, Inc.",
       exchange: "NASDAQ",
     });
-    await expect(hub.findAsset("AA")).resolves.toBeNull();
+    expect(checked.get("AA")).toBeNull();
     expect(hub.snapshot().watchlist).toEqual([]);
+    await hub.stop();
+  });
+
+  it("checks tickers one by one when the listing can't load, leaving out ones it can't check", async () => {
+    const { provider } = fakeProvider();
+    vi.spyOn(provider, "listAssets").mockRejectedValue(new Error("trading API down"));
+    const getAsset = vi.spyOn(provider, "getAsset").mockImplementation(async (symbol) => {
+      if (symbol === "JNJ") throw new Error("socket hang up");
+      return symbol === "AMD"
+        ? { symbol: "AMD", name: "Advanced Micro Devices, Inc.", exchange: "NASDAQ" }
+        : null;
+    });
+    const { hub } = await startedHub(provider);
+    const checked = await hub.verifyListed(["AMD", "ZZZQ", "JNJ"]);
+    expect(checked.get("AMD")?.exchange).toBe("NASDAQ");
+    expect(checked.get("ZZZQ")).toBeNull();
+    expect(checked.has("JNJ")).toBe(false);
+    expect(getAsset).toHaveBeenCalledTimes(3);
     await hub.stop();
   });
 

@@ -78,7 +78,7 @@ Main: "Stock ideas" + basis line ("Based on your portfolio" / "Based on your wat
 |---|---|
 | `app/routes/_index.tsx` | Dashboard; loader returns `hub.snapshot()` for SSR, then `useMarketStream` takes over |
 | `app/hooks/use-market-stream.ts` | `EventSource('/api/stream')`; React state updates ≤ 1×/frame; `onLive(listener)` delivers ticks/bars to the chart without re-rendering |
-| `app/components/top-bar.tsx` | Brand, Markets/Ideas/Portfolio nav, market phase + next change (ET), provider `liveDataLabel`, display-currency picker (`krestrel.currency`), connection dot |
+| `app/components/top-bar.tsx` | Brand, Markets/Ideas/Portfolio nav, market phase + next change in the viewer's local time with New York time in brackets, e.g. "opens Wed 20:30 (09:30 ET)" (`describeMarket(clock, useTimeZone(), now)`; server render and New York viewers see ET only), provider `liveDataLabel`, display-currency picker (`krestrel.currency`), connection dot |
 | `app/hooks/use-currency.ts` | `useCurrency()`: shared display currency (external store over localStorage), one `/api/fx` request per page, `money(usd, signed?)`; USD until the rate is known |
 | `app/routes/portfolio.tsx` | Portfolio page (`?p=<id>`, none = All): summary (Value, Unrealized, Today, Realized, Total P/L), holdings, trade form + ledger, rate note |
 | `app/components/portfolio/*` | `portfolio-list` (sidebar + create), `holdings-table` (open by value, then closed; symbol opens its chart), `trade-form` (Buy/Sell, ticker, shares, price USD with "use last price", fee, date; also edits), `trade-history` (USD ledger, edit/delete) |

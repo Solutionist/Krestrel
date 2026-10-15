@@ -16,6 +16,7 @@ import { useNow } from "~/hooks/use-now";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
 import { useRsiSignals } from "~/hooks/use-rsi-signals";
 import { useThemeVersion } from "~/hooks/use-theme";
+import { useTimeZone } from "~/hooks/use-time-zone";
 import { BASE_CURRENCY } from "~/lib/currency";
 import { formatChange, formatPercentChange, formatPrice } from "~/lib/format";
 import { type PriceChange, priceChange } from "~/lib/price-change";
@@ -45,6 +46,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   const { state, onLive } = useMarketStream(loaderData);
   const [params, setParams] = useSearchParams();
   const now = useNow();
+  const timeZone = useTimeZone();
   const display = useCurrency();
   const themeVersion = useThemeVersion();
   const [levels] = rsiLevels.use();
@@ -59,7 +61,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
     requested && state.watchlist.includes(requested) ? requested : (state.watchlist[0] ?? null);
   const quote = selected ? state.quotes[selected] : undefined;
   const change = quote ? priceChange(quote) : null;
-  const market = describeMarket(state.clock);
+  const market = describeMarket(state.clock, timeZone, now);
   const connection = describeConnection(state.link, state.status, now);
 
   const select = (symbol: string) =>

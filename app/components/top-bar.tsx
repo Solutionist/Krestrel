@@ -82,7 +82,7 @@ export function TopBar({
 
       <span
         className="hidden items-center gap-2 rounded-full bg-subtle px-3 py-1 text-xs md:inline-flex"
-        title="Exchange session (New York time)"
+        title={market.title}
       >
         <span
           aria-hidden

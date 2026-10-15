@@ -10,13 +10,7 @@ import { logger } from "~/.server/logger";
 import { db } from "~/.server/market/db/instance";
 import { listTrades } from "~/.server/market/db/queries/portfolios";
 import { getMarketHub } from "~/.server/market/instance";
-import {
-  type Idea,
-  type IdeasModelOutput,
-  IdeasRequestSchema,
-  type IdeasResponse,
-  type Sector,
-} from "~/lib/ideas";
+import { type Idea, IdeasRequestSchema, type IdeasResponse, type Sector } from "~/lib/ideas";
 
 import type { Route } from "./+types/api.ideas";
 
@@ -77,6 +71,8 @@ export async function action({ request }: Route.ActionArgs) {
     await hub.start(); // The watchlist is loaded on start.
     const watchlist = hub.snapshot().watchlist;
     const { basis, holdings } = await startingMix(watchlist);
+    // Load the ticker listing while Claude works, so checking its picks is instant afterwards.
+    hub.warmAssets();
     const { ideas: answer, model: usedModel } = await generateIdeas(llm, {
       focus,
       basis,
@@ -88,23 +84,15 @@ export async function action({ request }: Route.ActionArgs) {
       now: Date.now(),
     });
 
-    let listed: Array<{ idea: IdeasModelOutput["ideas"][number]; exchange: string; name: string }>;
-    try {
-      const assets = await Promise.all(answer.ideas.map((idea) => hub.findAsset(idea.symbol)));
-      listed = answer.ideas.flatMap((idea, i) => {
-        const asset = assets[i];
-        return asset
-          ? [{ idea, exchange: asset.exchange, name: asset.name.trim() || idea.name }]
-          : [];
-      });
-    } catch (err) {
-      logger.error({ err }, "ideas: asset listing unavailable");
-      return fail(
-        502,
-        "upstream",
-        `Couldn't check the suggested tickers with ${hub.provider.displayName}. Try again in a moment.`,
-      );
-    }
+    // Drop tickers the provider says aren't listed; keep ones it couldn't check right now
+    // (network blip) rather than discard the whole run.
+    const checked = await hub.verifyListed(answer.ideas.map((idea) => idea.symbol));
+    const listed = answer.ideas.flatMap((idea) => {
+      const asset = checked.get(idea.symbol);
+      if (asset === null) return [];
+      if (asset === undefined) return [{ idea, exchange: "", name: idea.name }];
+      return [{ idea, exchange: asset.exchange, name: asset.name.trim() || idea.name }];
+    });
     if (listed.length < MIN_VERIFIED_IDEAS) {
       return fail(
         502,
