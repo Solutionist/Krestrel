@@ -28,3 +28,4 @@ The owner asked to record holdings ("how much stock I own, at what price I bough
 - Only currency codes leave the machine for rates; no market, portfolio or account data is sent, so the personal-use data licence is unaffected. This is not trading: Krestrel places no orders.
 - Switching to per-buy-date rates later needs historical rates per trade date (Frankfurter supports `date=`); the ledger already stores `traded_on`.
 - Splits are not adjusted: a split needs a manual edit of the affected trades.
+- Amended by ADR 0027 (2026-10-15): the yearly report converts each sell and dividend at its own date's rate. For that, the currency code and one start date (the earliest trade or dividend) go to Frankfurter; still no trade, portfolio or account data. Everywhere else keeps today's rate.

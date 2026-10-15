@@ -28,7 +28,7 @@ export interface Backfiller {
 }
 
 /** Groups symbols by start key, then splits each group into provider-sized batches. */
-function batchesByStart<K>(
+export function batchesByStart<K>(
   starts: ReadonlyArray<[symbol: string, start: K]>,
   size: number,
 ): Array<[K, string[]]> {
@@ -41,7 +41,7 @@ function batchesByStart<K>(
   });
 }
 
-function nextDay(day: string): string {
+export function nextDay(day: string): string {
   return new Date(Date.parse(`${day}T00:00:00Z`) + DAY).toISOString().slice(0, 10);
 }
 

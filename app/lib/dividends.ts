@@ -1,6 +1,6 @@
 // Dividend schedule from the provider's cash-dividend records (ADR 0022): how often a stock pays,
 // the latest regular amount, and the next payment, announced or, when not yet announced,
-// expected from the usual gap. Shared by the server (GET /api/dividends) and the page.
+// expected from the usual schedule. Shared by the server (GET /api/dividends) and the page.
 
 import * as z from "zod";
 
@@ -40,6 +40,16 @@ export const PAYMENTS_PER_YEAR: Record<DividendFrequency, number | null> = {
   annual: 1,
   irregular: null,
 };
+
+/**
+ * Yearly yield in percent at `price`: the next (or last) amount × payments a year ÷ price. Null for
+ * an irregular payer or without a price.
+ */
+export function dividendYield(info: DividendInfo, price: number | null): number | null {
+  const perYear = PAYMENTS_PER_YEAR[info.frequency];
+  if (perYear === null || price === null || price <= 0) return null;
+  return ((info.next?.amount ?? info.last.amount) * perYear * 100) / price;
+}
 
 const DividendDatesSchema = z.object({
   exDate: z.iso.date(),
@@ -108,7 +118,8 @@ function median(values: readonly number[]): number | null {
  * The dividend schedule as of `today` (`YYYY-MM-DD`, New York), or null for a stock without a
  * regular dividend in the last 15 months. Frequency is the median gap between the latest regular
  * ex-dates. The next payment is the first announced one after today; otherwise the last one
- * moved on by that gap (and again until it lies after today), marked `expected`.
+ * moved on by that frequency in calendar months (and again until it lies after today), marked
+ * `expected`.
  */
 export function dividendInfo(
   payments: readonly DividendPayment[],
@@ -141,16 +152,19 @@ export function dividendInfo(
         expected: false,
       }
     : null;
-  if (!next && gap !== null && frequency !== "irregular") {
-    const step = Math.round(gap);
-    let exDate = addDays(last.exDate, step);
-    let payDate = last.payDate ? addDays(last.payDate, step) : null;
+  const perYear = PAYMENTS_PER_YEAR[frequency];
+  if (!next && perYear !== null) {
+    // Calendar months, not days: a month-end payer's ~31-day gap would skip February.
+    const stepMonths = 12 / perYear;
     // Overdue but not yet announced: the schedule still says one is coming.
-    while (exDate <= today) {
-      exDate = addDays(exDate, step);
-      payDate = payDate ? addDays(payDate, step) : null;
+    for (let k = 1; !next || next.exDate <= today; k++) {
+      next = {
+        exDate: addMonths(last.exDate, stepMonths * k),
+        payDate: last.payDate ? addMonths(last.payDate, stepMonths * k) : null,
+        amount: last.amount,
+        expected: true,
+      };
     }
-    next = { exDate, payDate, amount: last.amount, expected: true };
   }
 
   return {
@@ -179,8 +193,23 @@ export function upcomingDividend(info: DividendInfo, today: string): UpcomingDiv
 }
 
 /**
+ * `day` moved by `months` calendar months, kept on the same day of the month or the month's last
+ * day when it has fewer (Jan 31 → Feb 28), so a monthly payer lands in every month.
+ */
+function addMonths(day: string, months: number): string {
+  const [year = 0, month = 1, date = 1] = day.split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  target.setUTCDate(Math.min(date, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+/**
  * Every payment from `today` up to and including `untilDay` (by pay date, else ex-date): a payout
- * still pending, the next one, then further ones projected by the usual gap (always `expected`).
+ * still pending, the next one, then further ones projected by the usual gap in calendar months
+ * (always `expected`).
  */
 export function projectDividends(
   info: DividendInfo,
@@ -194,22 +223,22 @@ export function projectDividends(
     payments.push({ ...info.last, expected: false, pending: true });
   }
   const first = info.next;
-  // Average days between payments, for projecting the schedule forward.
   const perYear = PAYMENTS_PER_YEAR[info.frequency];
-  const step = perYear === null ? null : 365.25 / perYear;
+  // Months between payments: 1 monthly, 3 quarterly, 6 twice a year, 12 yearly.
+  const stepMonths = perYear === null ? null : 12 / perYear;
   // The next payment as known, then the same amount every usual gap after it.
   for (let k = 0; first && k < 400; k++) {
-    const days = k === 0 || step === null ? 0 : Math.round(step * k);
+    const months = k === 0 || stepMonths === null ? 0 : stepMonths * k;
     const payment: UpcomingDividend = {
-      exDate: addDays(first.exDate, days),
-      payDate: first.payDate ? addDays(first.payDate, days) : null,
+      exDate: addMonths(first.exDate, months),
+      payDate: first.payDate ? addMonths(first.payDate, months) : null,
       amount: first.amount,
       expected: k > 0 || first.expected,
       pending: false,
     };
     if (!within(payment)) break;
     payments.push(payment);
-    if (step === null) break;
+    if (stepMonths === null) break;
   }
   return payments;
 }

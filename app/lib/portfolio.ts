@@ -8,7 +8,7 @@ export const TRADE_SIDES = ["buy", "sell"] as const;
 export type TradeSide = (typeof TRADE_SIDES)[number];
 
 /** Share quantities are stored with 6 decimals; anything smaller is rounding noise. */
-const SHARE_EPSILON = 1e-6;
+export const SHARE_EPSILON = 1e-6;
 
 export interface Trade {
   id: string;
@@ -76,7 +76,7 @@ export type PositionsResult =
  * Replay order: trade date, then buys before sells on the same day (so entering a day's trades in
  * any order works), then entry order.
  */
-function replayOrder(a: Trade, b: Trade): number {
+export function replayOrder(a: Trade, b: Trade): number {
   if (a.tradedOn !== b.tradedOn) return a.tradedOn < b.tradedOn ? -1 : 1;
   if (a.side !== b.side) return a.side === "buy" ? -1 : 1;
   return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0;

@@ -36,6 +36,13 @@
       "when": 1792044157235,
       "tag": "0004_stock_profiles_sector_check",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792063321217,
+      "tag": "0005_cheerful_titanium_man",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,10 @@
 import { ChartLineUpIcon, MagnifyingGlassIcon, WarningCircleIcon } from "@phosphor-icons/react";
+import { useMemo } from "react";
 import { useSearchParams } from "react-router";
 
 import { getMarketHub } from "~/.server/market/instance";
+import { AlertBar } from "~/components/alerts/alert-bar";
+import { AlertToasts } from "~/components/alerts/alert-toasts";
 import { AppShell } from "~/components/app-shell";
 import { PriceChart } from "~/components/chart/price-chart";
 import { DividendSummary } from "~/components/dividend-text";
@@ -11,6 +14,7 @@ import { Button } from "~/components/ui/button";
 import { CARD } from "~/components/ui/styles";
 import { Watchlist } from "~/components/watchlist/watchlist";
 import { DIRECTION_GLYPH } from "~/components/watchlist/watchlist-row";
+import { useAlerts } from "~/hooks/use-alerts";
 import { useCurrency } from "~/hooks/use-currency";
 import { useDividends } from "~/hooks/use-dividends";
 import { useMarketStream } from "~/hooks/use-market-stream";
@@ -45,7 +49,8 @@ export function loader() {
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-  const { state, onLive } = useMarketStream(loaderData);
+  const { state, onLive, onAlert } = useMarketStream(loaderData);
+  const alerts = useAlerts({ onAlert, watchlist: state.watchlist, link: state.link });
   const [params, setParams] = useSearchParams();
   const now = useNow();
   const timeZone = useTimeZone();
@@ -65,6 +70,16 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
   // One request for the whole watchlist, so switching symbols shows the line at once.
   const dividends = useDividends(state.watchlist);
   const dividend = selected ? dividends?.bySymbol[selected] : undefined;
+  const symbolAlerts = useMemo(
+    () => alerts.alerts?.filter((alert) => alert.symbol === selected) ?? [],
+    [alerts.alerts, selected],
+  );
+  const alertLines = useMemo(() => symbolAlerts.filter((alert) => alert.active), [symbolAlerts]);
+  const alerted = useMemo(
+    () =>
+      new Set(alerts.alerts?.filter((alert) => alert.active).map((alert) => alert.symbol) ?? []),
+    [alerts.alerts],
+  );
   const change = quote ? priceChange(quote) : null;
   const market = describeMarket(state.clock, timeZone, now);
   const connection = describeConnection(state.link, state.status, now);
@@ -107,6 +122,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           onSelect={select}
           signals={signals}
           levels={levels}
+          alerted={alerted}
         />
       }
     >
@@ -155,6 +171,16 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
               symbol={selected}
               onLive={onLive}
               historyVersion={state.historyVersion[selected] ?? 0}
+              alertLines={alertLines}
+            />
+            <AlertBar
+              key={selected}
+              symbol={selected}
+              lastPrice={quote?.lastPrice ?? null}
+              alerts={symbolAlerts}
+              error={alerts.error}
+              onCreate={alerts.create}
+              onRemove={(id) => void alerts.remove(id)}
             />
             {dividends && dividend && (
               <div className="border-t border-rule/60 px-5 py-2.5">
@@ -191,6 +217,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
           </div>
         )}
       </main>
+      <AlertToasts fired={alerts.fired} onDismiss={alerts.dismiss} onOpen={select} />
     </AppShell>
   );
 }

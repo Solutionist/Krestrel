@@ -23,7 +23,7 @@ Drizzle syntax notes (0.45.4):
 
 ## Daily history (ADR 0011)
 
-`bars_1d(symbol, source, day date, open, high, low, close, volume)`, PK `(symbol, source, day)`, split-adjusted, `day` = New York trading date (migration `0001_daily_bars`). Queries: `upsertDailyBars`, `latestDailyDay`, `getCalendarCandles` (daily rows + minute-built days after the newest daily row, rolled up by `aggregateDays` from `app/lib/candles.ts`). Intraday `getCandles` buckets 1m/5m/15m/30m/1h/4h with `date_bin`.
+`bars_1d(symbol, source, day date, open, high, low, close, volume)`, PK `(symbol, source, day)`, split-adjusted, `day` = New York trading date (migration `0001_daily_bars`). Queries: `upsertDailyBars`, `latestDailyDay`, `getCalendarCandles` (daily rows + minute-built days after the newest daily row, rolled up by `aggregateDays` from `app/lib/candles.ts`), `dailyBounds` (first/last stored day per symbol) and `listDailyCloses` (closes for many symbols over `[from, to)`), the last two for portfolio performance (ADR 0024), which also stores daily history for held stocks that aren't on the watchlist. Intraday `getCandles` buckets 1m/5m/15m/30m/1h/4h with `date_bin`.
 
 ## Numeric mapping (ADR 0008)
 
@@ -43,7 +43,9 @@ Prices `numeric({ precision: 14, scale: 4, mode: "number" })`, volume `bigint({ 
 - `watchlist.ts`: `addToWatchlist(db, symbol, maxSymbols)` returns a typed result (`duplicate` | `limit`); add/reorder are serialized with `pg_advisory_xact_lock`. `reorderWatchlist` only accepts an exact permutation.
 - `bars.ts`: `upsertBars` (chunks of 1000 rows, de-duplicates repeated keys in one call, last wins), `latestBarTime`, `getCandles`.
 - `portfolios.ts`: portfolio names are unique ignoring case (checked under an advisory lock). `addTrade`/`updateTrade`/`deleteTrade` replay the portfolio's trades with the change applied (`computePositions`) under a per-portfolio advisory lock and return `oversell` instead of writing when a sell would exceed the shares held on its date.
-- `alerts.ts`: `markAlertTriggered` is a conditional `UPDATE … WHERE active RETURNING`, the fire-once guarantee.
+- `alerts.ts`: `markAlertTriggered` is a conditional `UPDATE … WHERE active RETURNING`, the fire-once guarantee. `createAlert` returns `null` when the symbol isn't on the watchlist (foreign-key violation, code 23503); `listRecentAlerts(db, since)` returns active alerts plus those fired since then (ADR 0023).
+- `portfolio-targets.ts`: `listTargets` (largest first) and `replaceTargets`, which locks the portfolio row (`SELECT … FOR UPDATE`) and swaps the whole set in one transaction; false when the portfolio is gone (ADR 0026).
+- `dividend-overrides.ts`: `listDividendOverrides(db, portfolioIds)`, `setDividendOverride` (upsert on portfolio + symbol + ex-date after `SELECT … FOR SHARE` on the portfolio row; false when the portfolio is gone) and `clearDividendOverride` (ADR 0025).
 - Raw SQL params: pass timestamps as ISO strings with `::timestamptz` (Drizzle replaces postgres.js timestamp serializers).
 - `db.execute(sql\`…\`)` with postgres-js returns a row **array**. Close with `await db.$client.end()`.
 

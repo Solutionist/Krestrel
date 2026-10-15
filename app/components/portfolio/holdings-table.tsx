@@ -6,7 +6,12 @@ import { toneOf } from "~/components/ui/styles";
 import { createStoredValue } from "~/hooks/stored-value";
 import type { DisplayCurrency } from "~/hooks/use-currency";
 import type { Dividends } from "~/hooks/use-dividends";
-import { type DividendInfo, type ExpectedPayment, FREQUENCY_LABELS } from "~/lib/dividends";
+import {
+  type DividendInfo,
+  dividendYield,
+  type ExpectedPayment,
+  FREQUENCY_LABELS,
+} from "~/lib/dividends";
 import { formatPercentChange, formatShares } from "~/lib/format";
 import { IDEA_CATEGORIES, IDEA_CATEGORY_LABELS, SECTOR_SHORT, SECTORS } from "~/lib/ideas";
 import type { ValuedPosition } from "~/lib/portfolio";
@@ -412,6 +417,7 @@ function OpenRow({
           info={dividends?.bySymbol[symbol]}
           payment={dividends?.next[symbol]}
           today={dividends?.today ?? ""}
+          price={position.lastPrice}
           display={display}
         />
       </td>
@@ -427,12 +433,15 @@ function DividendCell({
   info,
   payment,
   today,
+  price,
   display,
 }: {
   /** undefined: not known yet (loading or provider unavailable); null: no regular dividend. */
   info: DividendInfo | null | undefined;
   payment: ExpectedPayment | undefined;
   today: string;
+  /** Live price for the yield; null without one. */
+  price: number | null;
   display: DisplayCurrency;
 }) {
   if (info === undefined) return <span className="text-muted">…</span>;
@@ -446,8 +455,9 @@ function DividendCell({
       </span>
     );
   }
+  const yieldPct = dividendYield(info, price);
   const tip = [
-    `${FREQUENCY_LABELS[info.frequency]}, ${display.money(payment.amount)} a share.`,
+    `${FREQUENCY_LABELS[info.frequency]}, ${display.money(payment.amount)} a share${yieldPct === null ? "" : ` (≈${yieldPct.toFixed(1)}% a year at the last price)`}.`,
     `${upcomingText(payment, today)}.`,
     payment.pending
       ? `Paid on the ${formatShares(payment.shares)} shares you held before the ex-dividend date.`
@@ -459,7 +469,10 @@ function DividendCell({
         {formatDay(payment.payDate ?? payment.exDate, today)}
         {payment.expected && <span className="ml-1 text-xs text-muted">expected</span>}
       </span>
-      <span className="text-xs text-muted">{display.money(payment.cash)}</span>
+      <span className="text-xs text-muted">
+        {display.money(payment.cash)}
+        {yieldPct !== null && ` · ${yieldPct.toFixed(1)}%`}
+      </span>
     </span>
   );
 }

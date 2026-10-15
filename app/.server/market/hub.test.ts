@@ -246,6 +246,51 @@ describe("MarketHub live data", () => {
     });
     expect(candles.map((candle) => candle.close)).toEqual([51]);
   });
+
+  it("sends one alert event when live trades reach an alert, then the alert is off", async () => {
+    const { provider, live } = fakeProvider();
+    const { hub, events } = await startedHub(provider);
+    await hub.addSymbol("AAPL");
+    const created = await hub.alerts.create({ symbol: "AAPL", direction: "above", price: 101 });
+    if (!created.ok) throw new Error(created.message);
+
+    live().onTick({ symbol: "AAPL", price: 100.5, size: 1, ts: NOW + 1000 });
+    live().onTick({ symbol: "AAPL", price: 101, size: 1, ts: NOW + 2000 });
+    live().onTick({ symbol: "AAPL", price: 101.5, size: 1, ts: NOW + 3000 });
+    await hub.stop(); // waits for triggers in flight
+
+    expect(events.filter((event) => event.event === "alert").map((event) => event.data)).toEqual([
+      {
+        id: created.alert.id,
+        symbol: "AAPL",
+        direction: "above",
+        price: 101,
+        triggerPrice: 101,
+        triggeredAt: NOW + 2000,
+      },
+    ]);
+    expect(await hub.alerts.list()).toEqual([
+      expect.objectContaining({ id: created.alert.id, active: false }),
+    ]);
+  });
+
+  it("forgets a removed symbol's alerts, so a later trade after re-adding it touches no old alert", async () => {
+    const { provider, live } = fakeProvider();
+    const { hub, events } = await startedHub(provider);
+    await hub.addSymbol("AAPL");
+    const created = await hub.alerts.create({ symbol: "AAPL", direction: "above", price: 101 });
+    if (!created.ok) throw new Error(created.message);
+
+    expect(await hub.removeSymbol("AAPL")).toBe(true);
+    await hub.addSymbol("AAPL");
+    const update = vi.spyOn(db, "update");
+    live().onTick({ symbol: "AAPL", price: 102, size: 1, ts: NOW + 1000 });
+    await hub.stop();
+
+    expect(update).not.toHaveBeenCalled();
+    expect(events.some((event) => event.event === "alert")).toBe(false);
+    update.mockRestore();
+  });
 });
 
 describe("MarketHub news", () => {

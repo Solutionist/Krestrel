@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, or } from "drizzle-orm";
 
 import type { Database } from "../client";
 import { alerts } from "../schema";
@@ -6,17 +6,39 @@ import { alerts } from "../schema";
 export type Alert = typeof alerts.$inferSelect;
 export type AlertDirection = Alert["direction"];
 
+/** Postgres `foreign_key_violation`: the symbol isn't on the watchlist. */
+const FOREIGN_KEY_VIOLATION = "23503";
+
+/** Inserts an alert; `null` when its symbol isn't on the watchlist (alerts belong to watched symbols). */
 export async function createAlert(
   db: Database,
   input: { symbol: string; direction: AlertDirection; price: number },
-): Promise<Alert> {
-  const [alert] = await db.insert(alerts).values(input).returning();
-  if (!alert) throw new Error("Alert insert returned no row");
-  return alert;
+): Promise<Alert | null> {
+  try {
+    const [alert] = await db.insert(alerts).values(input).returning();
+    if (!alert) throw new Error("Alert insert returned no row");
+    return alert;
+  } catch (err) {
+    // Drizzle wraps the driver's error; the Postgres code sits on `cause`.
+    const cause = err instanceof Error ? (err.cause ?? err) : err;
+    if (typeof cause === "object" && cause !== null && "code" in cause) {
+      if (cause.code === FOREIGN_KEY_VIOLATION) return null;
+    }
+    throw err;
+  }
 }
 
 export function listAlerts(db: Database): Promise<Alert[]> {
   return db.select().from(alerts).orderBy(desc(alerts.createdAt));
+}
+
+/** Active alerts plus those fired since `triggeredSince`, newest first. */
+export function listRecentAlerts(db: Database, triggeredSince: Date): Promise<Alert[]> {
+  return db
+    .select()
+    .from(alerts)
+    .where(or(eq(alerts.active, true), gte(alerts.triggeredAt, triggeredSince)))
+    .orderBy(desc(alerts.createdAt));
 }
 
 export function listActiveAlerts(db: Database): Promise<Alert[]> {

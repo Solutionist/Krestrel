@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | Unit | Vitest 5 project `unit` | `app/**/*.test.ts`, `tests/unit/**/*.test.ts` | node | `bun run test` |
 | Component | Vitest 5 project `dom` | `app/**/*.test.tsx`, `tests/unit/**/*.test.tsx` | jsdom 30 | `bun run test` |
-| DB + hub | Vitest project `db` | `app/.server/market/db/**/*.test.ts`, `app/.server/market/hub.test.ts` | real Postgres (`<db>_test`), files sequential | `bun run test` (needs `bun run db:up`) |
+| DB + hub | Vitest project `db` | `app/.server/market/db/**/*.test.ts`, `app/.server/market/hub.test.ts`, `app/.server/market/alert-engine.test.ts` | real Postgres (`<db>_test`), files sequential | `bun run test` (needs `bun run db:up`) |
 | E2E (Phase 5) | Playwright | `tests/e2e/` | Chromium, `MARKET_PROVIDER=mock` | `bun run test:e2e` |
 
 Run one project: `bun run vitest run --project unit`. Watch: `bun run vitest`.

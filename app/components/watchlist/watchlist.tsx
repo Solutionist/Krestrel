@@ -74,6 +74,7 @@ export function Watchlist({
   onSelect,
   signals,
   levels,
+  alerted,
 }: {
   symbols: string[];
   quotes: Record<string, QuoteSnapshot>;
@@ -83,6 +84,8 @@ export function Watchlist({
   /** Daily RSI signal per symbol (ADR 0014). */
   signals: Record<string, RsiSignal | null>;
   levels: RsiLevels;
+  /** Symbols with an active price alert (ADR 0023). */
+  alerted: ReadonlySet<string>;
 }) {
   const mutate = useFetcher<ActionResult>();
   const [sort, setSort] = usePersistedSort();
@@ -253,6 +256,7 @@ export function Watchlist({
                   }
                   signal={signals[symbol] ?? null}
                   levels={levels}
+                  alerted={alerted.has(symbol)}
                 />
                 {/* Pointer shortcut only; keyboard users press Delete on the row. Hidden until hover so it never covers the price at rest. */}
                 <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-visible:opacity-100">

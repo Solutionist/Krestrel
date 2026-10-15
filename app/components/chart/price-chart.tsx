@@ -44,6 +44,7 @@ import { createStoredValue } from "~/hooks/stored-value";
 import { useAiChoice } from "~/hooks/use-ai";
 import type { LiveListener } from "~/hooks/use-market-stream";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
+import type { PriceAlert } from "~/lib/alerts";
 import { type Analysis, analyzeChart, type Trade } from "~/lib/analysis";
 import {
   formatExchangeDate,
@@ -164,11 +165,14 @@ export function PriceChart({
   symbol,
   onLive,
   historyVersion,
+  alertLines,
 }: {
   symbol: string;
   onLive: (listener: LiveListener) => () => void;
   /** Changes when the server has downloaded new history for `symbol`; triggers a reload. */
   historyVersion: number;
+  /** Active price alerts for `symbol`, drawn as dotted lines (ADR 0023). */
+  alertLines: readonly PriceAlert[];
 }) {
   const container = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartParts | null>(null);
@@ -223,6 +227,7 @@ export function PriceChart({
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const levelLinesRef = useRef<IPriceLine[]>([]);
   const planLinesRef = useRef<IPriceLine[]>([]);
+  const alertLinesRef = useRef<IPriceLine[]>([]);
   const trendSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const overlaysRef = useRef(overlays);
   const indicatorsRef = useRef(indicators);
@@ -421,6 +426,7 @@ export function PriceChart({
       markersRef.current = null;
       levelLinesRef.current = [];
       planLinesRef.current = [];
+      alertLinesRef.current = [];
       trendSeriesRef.current = null;
       indicatorSeries.current.clear();
       rsiPaneRef.current = null;
@@ -666,6 +672,24 @@ export function PriceChart({
       line(price, theme.rise, LineStyle.Dotted, `T${index + 1}`);
     });
   }, [overlays, outlook, analysis]);
+
+  // Price alerts: one sparse dotted accent line per active alert, labelled with its direction.
+  useEffect(() => {
+    const parts = chartRef.current;
+    if (!parts) return;
+    const { candles, theme } = parts;
+    for (const line of alertLinesRef.current) candles.removePriceLine(line);
+    alertLinesRef.current = alertLines.map((alert) =>
+      candles.createPriceLine({
+        price: alert.price,
+        color: theme.line("--color-accent", 0.75),
+        lineWidth: 1,
+        lineStyle: LineStyle.SparseDotted,
+        axisLabelVisible: true,
+        title: `Alert ${alert.direction === "above" ? "▲" : "▼"}`,
+      }),
+    );
+  }, [alertLines]);
 
   // ── View: presets, zoom, focus ───────────────────────────────────────────────────────────
   /** Zooms to the interval's default period (INTERVAL_RANGE), or all candles if shorter. */

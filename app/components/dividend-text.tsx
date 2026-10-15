@@ -1,8 +1,8 @@
 import { CoinsIcon } from "@phosphor-icons/react";
 import {
   type DividendInfo,
+  dividendYield,
   FREQUENCY_LABELS,
-  PAYMENTS_PER_YEAR,
   type UpcomingDividend,
 } from "~/lib/dividends";
 
@@ -61,9 +61,8 @@ export function DividendSummary({
   price: number | null;
   className?: string;
 }) {
-  const perYear = PAYMENTS_PER_YEAR[info.frequency];
   const amount = info.next?.amount ?? info.last.amount;
-  const yieldPct = perYear && price && price > 0 ? (amount * perYear * 100) / price : null;
+  const yieldPct = dividendYield(info, price);
   const pending =
     info.last.payDate && info.last.payDate >= today
       ? upcomingText({ ...info.last, expected: false, pending: true }, today)

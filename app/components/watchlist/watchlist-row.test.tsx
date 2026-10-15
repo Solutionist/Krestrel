@@ -36,4 +36,12 @@ describe("WatchlistRow", () => {
     expect(screen.getAllByText("—")).toHaveLength(2);
     expect(screen.getByText("no change data yet")).toBeInTheDocument();
   });
+
+  it("marks symbols with an active price alert, in words as well as the bell", () => {
+    const { rerender } = render(<WatchlistRow quote={quote(189.06, 187.81)} />);
+    expect(screen.queryByText("price alert set")).not.toBeInTheDocument();
+
+    rerender(<WatchlistRow quote={quote(189.06, 187.81)} alerted />);
+    expect(screen.getByText("price alert set")).toBeInTheDocument();
+  });
 });

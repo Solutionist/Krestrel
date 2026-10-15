@@ -74,7 +74,8 @@ Headers: `APCA-API-KEY-ID`, `APCA-API-SECRET-KEY`.
 - `schemas.ts` `parseStreamFrame` never throws: unknown `T` → debug, invalid known `T` → warn.
 - REST calls spaced ≥ 350 ms; HTTP 429 waits for `X-RateLimit-Reset` (≤ 3 retries). Errors never include headers.
 - `getNews` → `NewsItem { id, headline, summary, source, url (http(s) only, else null), createdAt (ISO) }`, newest first. The hub asks for the last 30 days (≤ 20) and returns `[]` on any failure, since news is optional context.
-- `getDividends` → `{ symbol, exDate, payDate | null, amount (rate), special }`, oldest first. The hub caches each symbol for 6 h and leaves symbols out (unknown) on failure (ADR 0022).
+- `getDividends` → `{ symbol, exDate, payDate | null, amount (rate), special }`, oldest first. The hub caches each symbol for 6 h and leaves symbols out (unknown) on failure (ADR 0022). `hub.getDividendHistory(symbols, fromDay)` asks the same method for `[fromDay, today]` with its own 6 h cache, for dividends received (ADR 0025).
+- `getDailyBars` also serves `hub.getDailyCloses(symbols, fromDay)` for portfolio performance (ADR 0024): any symbol, watched or not, downloading only the days missing from `bars_1d` (head before the first stored day, tail after the last), remembered per process; `getSnapshots` adds today's latest price. REST only, so it never touches the one stream.
 - Tests inject `openSocket` / `fetch` / `now` / `random` / `sleep`. Fixtures in `tests/fixtures/alpaca/` are copied from the docs examples, not live recordings (`rest-news.json` follows a live response's shape).
 
 ## Provider contract (ADR 0009)

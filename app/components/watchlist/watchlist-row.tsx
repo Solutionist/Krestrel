@@ -1,3 +1,4 @@
+import { BellSimpleIcon } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 
 import { formatChange, formatPercentChange, formatPrice } from "~/lib/format";
@@ -43,11 +44,14 @@ export function WatchlistRow({
   quote,
   signal,
   levels,
+  alerted = false,
 }: {
   quote: QuoteSnapshot;
   /** Daily RSI signal; omitted where signals aren't shown. */
   signal?: RsiSignal | null;
   levels?: RsiLevels;
+  /** Has an active price alert (ADR 0023). */
+  alerted?: boolean;
 }) {
   const change = priceChange(quote);
   const flash = usePriceFlash(quote.lastPrice);
@@ -55,7 +59,15 @@ export function WatchlistRow({
 
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 px-3 py-2.5">
-      <span className="truncate font-semibold tracking-tight text-text">{quote.symbol}</span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate font-semibold tracking-tight text-text">{quote.symbol}</span>
+        {alerted && (
+          <span title="Price alert set" className="shrink-0 text-accent">
+            <BellSimpleIcon aria-hidden size={12} />
+            <span className="sr-only">price alert set</span>
+          </span>
+        )}
+      </span>
       <span className={`text-right font-medium tabular-nums text-text ${flash}`}>
         {quote.lastPrice === null ? "—" : formatPrice(quote.lastPrice)}
       </span>

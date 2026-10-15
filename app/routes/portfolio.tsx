@@ -1,10 +1,14 @@
 import {
   CalculatorIcon,
+  ChartLineUpIcon,
   ChartPieSliceIcon,
   CircleNotchIcon,
+  CoinsIcon,
   ImageSquareIcon,
   ListBulletsIcon,
   PencilSimpleIcon,
+  ReceiptIcon,
+  ScalesIcon,
   TrashIcon,
   WalletIcon,
   WarningCircleIcon,
@@ -19,6 +23,7 @@ import { getMarketHub } from "~/.server/market/instance";
 import { AppShell } from "~/components/app-shell";
 import { AverageCalculator } from "~/components/portfolio/average-calculator";
 import { DIVIDEND_HORIZON_DAYS, DividendIncome } from "~/components/portfolio/dividend-income";
+import { DividendsPanel } from "~/components/portfolio/dividends-panel";
 import {
   ChangePill,
   GroupingControl,
@@ -26,7 +31,10 @@ import {
   holdingsGrouping,
 } from "~/components/portfolio/holdings-table";
 import { ImportHoldings } from "~/components/portfolio/import-holdings";
+import { PerformancePanel } from "~/components/portfolio/performance-panel";
 import { type PortfolioEntry, PortfolioList } from "~/components/portfolio/portfolio-list";
+import { RebalancePanel } from "~/components/portfolio/rebalance-panel";
+import { TaxReportPanel } from "~/components/portfolio/tax-report-panel";
 import { TradeForm } from "~/components/portfolio/trade-form";
 import { TradeHistory } from "~/components/portfolio/trade-history";
 import { TopBar } from "~/components/top-bar";
@@ -35,6 +43,7 @@ import { CARD, FIELD, LABEL, toneOf } from "~/components/ui/styles";
 import { TabBar } from "~/components/ui/tab-bar";
 import { type DisplayCurrency, useCurrency } from "~/hooks/use-currency";
 import { useDividends } from "~/hooks/use-dividends";
+import { useDividendsReceived } from "~/hooks/use-dividends-received";
 import { useMarketStream } from "~/hooks/use-market-stream";
 import { useNow } from "~/hooks/use-now";
 import { rsiLevels } from "~/hooks/use-rsi-levels";
@@ -77,7 +86,15 @@ export function shouldRevalidate({
   return onlyViewChanged(currentUrl, nextUrl) ? false : defaultShouldRevalidate;
 }
 
-const VIEWS = ["holdings", "trades", "calculator"] as const;
+const VIEWS = [
+  "holdings",
+  "trades",
+  "performance",
+  "dividends",
+  "rebalance",
+  "calculator",
+  "tax",
+] as const;
 type View = (typeof VIEWS)[number];
 
 export async function loader() {
@@ -183,9 +200,10 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
       : mergePositions([...positionsById.values()]),
   );
   const totals = portfolioTotals(positions);
-  const visibleTrades = selectedId
-    ? trades.filter((trade) => trade.portfolioId === selectedId)
-    : trades;
+  const visibleTrades = useMemo(
+    () => (selectedId ? trades.filter((trade) => trade.portfolioId === selectedId) : trades),
+    [selectedId, trades],
+  );
   const suggestions = [
     ...new Set([...state.watchlist, ...positions.map((position) => position.symbol)]),
   ].sort();
@@ -205,6 +223,12 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
         horizonDays: DIVIDEND_HORIZON_DAYS,
       })
     : null;
+  // Only the Dividends and Tax report tabs read it: don't ask the provider on the others.
+  const received = useDividendsReceived({
+    portfolioIds: selectedId ? [selectedId] : portfolios.map((portfolio) => portfolio.id),
+    trades: visibleTrades,
+    enabled: view === "dividends" || view === "tax",
+  });
 
   const select = useCallback(
     (id: string | null) => {
@@ -281,7 +305,11 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
                     Icon: ListBulletsIcon,
                     count: visibleTrades.length,
                   },
+                  { value: "performance", label: "Performance", Icon: ChartLineUpIcon },
+                  { value: "dividends", label: "Dividends", Icon: CoinsIcon },
+                  { value: "rebalance", label: "Rebalance", Icon: ScalesIcon },
                   { value: "calculator", label: "Average down", Icon: CalculatorIcon },
+                  { value: "tax", label: "Tax report", Icon: ReceiptIcon },
                 ]}
               />
 
@@ -405,6 +433,43 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
                   <AverageCalculator
                     positions={positions}
                     quotes={state.quotes}
+                    display={display}
+                  />
+                )}
+
+                {view === "performance" && (
+                  <PerformancePanel
+                    portfolioId={selectedId}
+                    trades={visibleTrades}
+                    display={display}
+                  />
+                )}
+                {view === "dividends" && (
+                  <DividendsPanel
+                    portfolioId={selectedId}
+                    portfolios={portfolios}
+                    positions={positions}
+                    trades={visibleTrades}
+                    dividends={dividends}
+                    received={received}
+                    display={display}
+                  />
+                )}
+
+                {view === "rebalance" && (
+                  <RebalancePanel
+                    portfolioId={selectedId}
+                    positions={positions}
+                    display={display}
+                    quotes={state.quotes}
+                  />
+                )}
+
+                {view === "tax" && (
+                  <TaxReportPanel
+                    trades={visibleTrades}
+                    received={received.received}
+                    receivedError={received.error}
                     display={display}
                   />
                 )}

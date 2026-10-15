@@ -41,18 +41,24 @@ Live prices, candlestick charts, portfolios and AI insight, all running on your 
 - **Indicators**: EMA 20/50/100, Bollinger Bands (20, 2), and RSI 14 with overbought/oversold zones and Buy/Sell markers.
 - **Hindsight analysis**: best past swing trades, support/resistance levels, a trend line, and a rule-based plan (buy zone, stop, targets), all computed locally.
 - **Dividends**: for stocks that pay, a line under the chart shows how often they pay, the amount per share and yield, and the next ex-dividend and pay dates (announced, or "expected" from the usual schedule).
+- **Price alerts**: set "above" or "below" a price for any watchlist stock from under the chart. Alerts show as lines on the chart and a bell in the watchlist. When the price reaches one, you get a notice in the app (and a browser notification if you allow it), and the alert switches off. Alerts are checked while Krestrel is running.
 - **Market status**: open, closed, pre-market or after hours.
 
 ### 💼 Portfolio
 
 - **Named portfolios** of buys and sells: fractional shares, fees, live value, and unrealized/realized/today's P/L (average-cost method). Sells of more shares than you held are refused.
-- **Tabs**: Holdings · Trades · Average down, so each tool has its own space.
-- **Sortable holdings**: click any column header (▲/▼). A **Next dividend** column shows each stock's next pay date and the cash it brings for your shares.
+- **Tabs**: Holdings · Trades · Performance · Dividends · Rebalance · Average down · Tax report, so each tool has its own space.
+- **Sortable holdings**: click any column header (▲/▼). A **Next dividend** column shows each stock's next pay date, the cash it brings for your shares, and its yearly yield at the last price.
 - **Expected dividends**: yearly income (and per month), yield on value and on cost (over holdings with a live price, like the totals), and every payment due in the next 90 days. A payout whose ex-dividend date has passed counts only the shares you held before it. Yearly payers are recognised from about 28 months of history.
 - **Import from a screenshot**: paste (Ctrl+V) a broker screen such as Dime. The AI reads ticker, shares and average cost; you review and edit, then import. With a local model the image never leaves your machine; with Claude it is masked first (see below).
 - **Group holdings** by sector or by type (Growth · Dividend · Risky), with each group's value and share. The AI classifies each stock once; correct any of them from the row's menu, and your choice sticks.
+- **Performance**: the portfolio's value over time against SPY, as if the same buys and sells had gone into SPY on the same days. Time-weighted return for 1M · 3M · YTD · 1Y · All (price only; dividends not included).
+- **Dividends received**: every payout you were entitled to since your first trade, worked out from the provider's payments and the shares you held before each ex-dividend date. Totals for this year, last year and all time. Set the tax withheld at source to see cash after tax, or enter the exact amount your broker paid for any payment (it sticks).
+- **Dividend calendar**: the next 12 months of expected payments for what you hold, month by month.
+- **Rebalance**: set a target % per stock and see what to buy (and, if you choose, sell) to reach it, with optional new cash to add. Suggestions only; Krestrel never places orders.
 - **Average-down calculator**: e.g. 50 @ $150, buy at $80, target $120 → 37.5 shares ($3,000).
-- **Display currency**: THB and ~30 others at the European Central Bank's daily rate (only currency codes are sent).
+- **Tax report**: realized P/L and dividends per year in your display currency, each amount converted at its own date's ECB rate (average-cost method, fees included), with a per-sell breakdown and a CSV download. For your records, not tax advice.
+- **Display currency**: THB and ~30 others at the European Central Bank's daily rate (only currency codes are sent, plus a start date for the tax report's past rates).
 
 ### 🤖 AI (opt-in)
 

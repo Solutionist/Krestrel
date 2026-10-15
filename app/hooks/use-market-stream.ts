@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { AlertFired } from "~/lib/alerts";
 import type { Bar, QuoteSnapshot, Tick } from "~/lib/market";
 import {
   type SnapshotPayload,
@@ -20,6 +21,7 @@ export interface MarketState extends Omit<SnapshotPayload, "quotes"> {
 
 export type LiveEvent = { event: "tick"; data: Tick } | { event: "bar"; data: Bar };
 export type LiveListener = (event: LiveEvent) => void;
+export type AlertListener = (fired: AlertFired) => void;
 
 function fromSnapshot(
   snapshot: SnapshotPayload,
@@ -37,11 +39,12 @@ function fromSnapshot(
 /**
  * Subscribes to `/api/stream`. React state (quotes, status, watchlist) updates at most once per
  * animation frame; ticks and bars are also delivered synchronously to `onLive` listeners (the
- * chart) so they never cause a React re-render.
+ * chart) so they never cause a React re-render. Fired price alerts go to `onAlert` listeners.
  */
 export function useMarketStream(initial: SnapshotPayload) {
   const [state, setState] = useState<MarketState>(() => fromSnapshot(initial, "connecting"));
   const listeners = useRef(new Set<LiveListener>());
+  const alertListeners = useRef(new Set<AlertListener>());
 
   useEffect(() => {
     const source = new EventSource("/api/stream");
@@ -109,6 +112,9 @@ export function useMarketStream(initial: SnapshotPayload) {
         ),
       })),
     );
+    on("alert", (fired) => {
+      for (const listener of alertListeners.current) listener(fired);
+    });
 
     source.onopen = () => setState((current) => ({ ...current, link: "open" }));
     // EventSource reconnects by itself; the server re-sends a full snapshot on reconnect.
@@ -127,5 +133,12 @@ export function useMarketStream(initial: SnapshotPayload) {
     };
   }, []);
 
-  return { state, onLive };
+  const onAlert = useCallback((listener: AlertListener) => {
+    alertListeners.current.add(listener);
+    return () => {
+      alertListeners.current.delete(listener);
+    };
+  }, []);
+
+  return { state, onLive, onAlert };
 }

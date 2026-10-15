@@ -146,3 +146,42 @@ export const stockProfiles = pgTable(
     ),
   ],
 );
+
+/**
+ * The owner's correction of a dividend received (ADR 0025): the cash that actually arrived, in
+ * USD after any withholding, for one payout (by ex-date) of one stock in one portfolio. Without a
+ * row the amount is derived from the provider's payouts and the shares held before the ex-date.
+ */
+export const dividendOverrides = pgTable(
+  "dividend_overrides",
+  {
+    portfolioId: uuid("portfolio_id")
+      .notNull()
+      .references(() => portfolios.id, { onDelete: "cascade" }),
+    symbol: text("symbol").notNull(),
+    exDate: date("ex_date", { mode: "string" }).notNull(),
+    amount: price("amount").notNull(),
+    updatedAt: utc("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.portfolioId, t.symbol, t.exDate] }),
+    check("dividend_overrides_amount_check", sql`${t.amount} >= 0`),
+  ],
+);
+
+/** Target weight per stock in a portfolio, in percent of its value (ADR 0026). */
+export const portfolioTargets = pgTable(
+  "portfolio_targets",
+  {
+    portfolioId: uuid("portfolio_id")
+      .notNull()
+      .references(() => portfolios.id, { onDelete: "cascade" }),
+    symbol: text("symbol").notNull(),
+    weight: numeric("weight", { precision: 7, scale: 4, mode: "number" }).notNull(),
+    updatedAt: utc("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.portfolioId, t.symbol] }),
+    check("portfolio_targets_weight_check", sql`${t.weight} > 0 AND ${t.weight} <= 100`),
+  ],
+);

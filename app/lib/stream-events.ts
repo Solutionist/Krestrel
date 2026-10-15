@@ -2,6 +2,7 @@
 // browser hook so both sides agree on event names and payload shapes.
 import * as z from "zod";
 
+import { AlertFiredSchema } from "./alerts";
 import {
   BarSchema,
   ConnectionStatusSchema,
@@ -33,6 +34,8 @@ export const STREAM_EVENT_SCHEMAS = {
   watchlist: WatchlistPayloadSchema,
   /** History download finished for these symbols; charts showing them should reload. */
   history: z.object({ symbols: z.array(z.string()) }),
+  /** A price alert fired (ADR 0023); sent once per alert. */
+  alert: AlertFiredSchema,
 } as const;
 
 export type StreamEventName = keyof typeof STREAM_EVENT_SCHEMAS;

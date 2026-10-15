@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte, max, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lt, lte, max, min, type SQL, sql } from "drizzle-orm";
 
 import { aggregateDays, type DayCandle, nyDay } from "~/lib/candles";
 import type {
@@ -190,6 +190,48 @@ export async function latestDailyDay(
     .from(bars1d)
     .where(and(eq(bars1d.symbol, symbol), eq(bars1d.source, source)));
   return row?.latest ?? null;
+}
+
+/** Each symbol's first and last stored trading date (`YYYY-MM-DD`) of daily history; missing when none. */
+export async function dailyBounds(
+  db: Database,
+  symbols: readonly string[],
+  source: BarSource,
+): Promise<Map<string, { first: string; last: string }>> {
+  if (symbols.length === 0) return new Map();
+  const rows = await db
+    .select({ symbol: bars1d.symbol, first: min(bars1d.day), last: max(bars1d.day) })
+    .from(bars1d)
+    .where(and(inArray(bars1d.symbol, [...symbols]), eq(bars1d.source, source)))
+    .groupBy(bars1d.symbol);
+  return new Map(
+    rows.flatMap(({ symbol, first, last }) =>
+      first !== null && last !== null ? [[symbol, { first, last }] as const] : [],
+    ),
+  );
+}
+
+/** Daily closes of `symbols` for trading dates in [fromDay, toDay), by symbol then date. */
+export async function listDailyCloses(
+  db: Database,
+  symbols: readonly string[],
+  source: BarSource,
+  fromDay: string,
+  toDay: string,
+): Promise<Array<{ symbol: string; day: string; close: number }>> {
+  if (symbols.length === 0) return [];
+  return db
+    .select({ symbol: bars1d.symbol, day: bars1d.day, close: bars1d.close })
+    .from(bars1d)
+    .where(
+      and(
+        inArray(bars1d.symbol, [...symbols]),
+        eq(bars1d.source, source),
+        gte(bars1d.day, fromDay),
+        lt(bars1d.day, toDay),
+      ),
+    )
+    .orderBy(asc(bars1d.symbol), asc(bars1d.day));
 }
 
 export interface CalendarCandleQuery extends Omit<CandleQuery, "timeframe"> {

@@ -18,9 +18,11 @@ import {
   SymbolSchema,
 } from "~/lib/market";
 import type { SnapshotPayload, StreamEvent } from "~/lib/stream-events";
+import { AlertEngine } from "./alert-engine";
 import { type AssetIndex, createAssetIndex } from "./asset-search";
 import { type Backfiller, createBackfiller } from "./backfill";
 import { type BarWriter, createBarWriter } from "./bar-writer";
+import { createDailyCloses, type DailyCloses, type DailyClosesResult } from "./daily-closes";
 import type { Database } from "./db/client";
 import {
   addToWatchlist,
@@ -28,6 +30,12 @@ import {
   removeFromWatchlist,
   reorderWatchlist,
 } from "./db/queries/watchlist";
+import {
+  createDividendCache,
+  createDividendHistory,
+  type DividendCache,
+  type DividendHistory,
+} from "./dividend-history";
 import type { MarketDataProvider } from "./provider";
 
 const MINUTE = 60_000;
@@ -40,8 +48,6 @@ const CLOCK_RETRY_MS = MINUTE;
 const ASSET_LIST_TTL_MS = 24 * 60 * MINUTE;
 const NEWS_LOOKBACK_MS = 30 * 24 * 60 * MINUTE;
 const NEWS_LIMIT = 20;
-/** Dividends change a few times a year; announcements can lag, so refresh a few times a day. */
-const DIVIDEND_TTL_MS = 6 * 60 * MINUTE;
 const DAY = 24 * 60 * MINUTE;
 
 export type HubListener = (event: StreamEvent | { event: "shutdown" }) => void;
@@ -70,6 +76,7 @@ export class MarketHub {
   readonly #now: () => number;
   readonly #writer: BarWriter;
   readonly #backfill: Backfiller;
+  readonly #alerts: AlertEngine;
   readonly #listeners = new Set<HubListener>();
   readonly #quotes = new Map<string, QuoteSnapshot>();
   #watchlist: string[] = [];
@@ -95,6 +102,12 @@ export class MarketHub {
       dailyYears: deps.dailyHistoryYears,
       now: this.#now,
     });
+    this.#alerts = new AlertEngine({
+      db: deps.db,
+      logger: this.#log.child({ mod: "alerts" }),
+      emit: (fired) => this.#emit({ event: "alert", data: fired }),
+      now: this.#now,
+    });
   }
 
   get provider(): ProviderInfo {
@@ -110,6 +123,11 @@ export class MarketHub {
     return this.#status;
   }
 
+  /** Price alerts (ADR 0023): create, delete, list. Live ticks are checked by the hub. */
+  get alerts(): AlertEngine {
+    return this.#alerts;
+  }
+
   /** Idempotent: connects upstream, subscribes the stored watchlist, starts clock and backfill. */
   start(): Promise<void> {
     this.#started ??= this.#start().catch((err: unknown) => {
@@ -121,6 +139,7 @@ export class MarketHub {
 
   async #start(): Promise<void> {
     this.#watchlist = (await listWatchlist(this.#db)).map((entry) => entry.symbol);
+    await this.#alerts.load();
     this.#log.info({ symbols: this.#watchlist.length }, "starting market hub");
 
     this.#provider.connect({
@@ -130,6 +149,7 @@ export class MarketHub {
         quote.lastPrice = tick.price;
         quote.lastTs = tick.ts;
         this.#emit({ event: "tick", data: tick });
+        this.#alerts.onPrice(tick.symbol, tick.price, tick.ts);
       },
       onBar: (bar) => {
         this.#writer.write(bar);
@@ -163,6 +183,7 @@ export class MarketHub {
     // Let an in-flight history download finish its page instead of writing after shutdown.
     await this.#backfill.close();
     await this.#writer.flush();
+    await this.#alerts.settled();
     for (const listener of this.#listeners) listener({ event: "shutdown" });
     this.#listeners.clear();
   }
@@ -288,41 +309,63 @@ export class MarketHub {
     }
   }
 
-  readonly #dividends = new Map<string, { at: number; payments: DividendPayment[] }>();
+  #dividends: DividendCache | null = null;
 
   /**
    * Cash dividends per symbol (ADR 0022): about 15 months back and 4 months ahead, cached for 6
    * hours, one provider call for whatever isn't cached. Optional context: on failure the
    * uncached symbols are left out (unknown), never reported as paying nothing.
    */
-  async getDividends(symbols: readonly string[]): Promise<Map<string, DividendPayment[]>> {
-    const now = this.#now();
-    const unique = [...new Set(symbols)];
-    const stale = unique.filter((symbol) => {
-      const cached = this.#dividends.get(symbol);
-      return !cached || now - cached.at > DIVIDEND_TTL_MS;
+  getDividends(symbols: readonly string[]): Promise<Map<string, DividendPayment[]>> {
+    this.#dividends ??= createDividendCache({
+      provider: this.#provider,
+      logger: this.#log,
+      now: this.#now,
+      failure: "dividend request failed",
     });
-    if (stale.length > 0) {
-      try {
-        const payments = await this.#provider.getDividends(
-          stale,
-          nyDay(now - DIVIDEND_LOOKBACK_DAYS * DAY),
-          nyDay(now + DIVIDEND_LOOKAHEAD_DAYS * DAY),
-        );
-        for (const symbol of stale) this.#dividends.set(symbol, { at: now, payments: [] });
-        for (const { symbol, ...payment } of payments) {
-          this.#dividends.get(symbol)?.payments.push(payment);
-        }
-      } catch (err) {
-        this.#log.warn({ err, symbols: stale.length }, "dividend request failed");
-      }
-    }
-    return new Map(
-      unique.flatMap((symbol) => {
-        const cached = this.#dividends.get(symbol);
-        return cached ? [[symbol, cached.payments] as const] : [];
-      }),
+    const now = this.#now();
+    return this.#dividends.get(
+      symbols,
+      {
+        fromDay: nyDay(now - DIVIDEND_LOOKBACK_DAYS * DAY),
+        toDay: nyDay(now + DIVIDEND_LOOKAHEAD_DAYS * DAY),
+      },
+      () => true,
     );
+  }
+
+  #dividendHistory: DividendHistory | null = null;
+
+  /**
+   * Cash dividends paid since `fromDay` (ADR 0025), for dividends received: its own 6-hour cache,
+   * as far back as asked. Symbols the provider couldn't be asked about are left out (unknown).
+   */
+  getDividendHistory(
+    symbols: readonly string[],
+    fromDay: string,
+  ): Promise<Map<string, DividendPayment[]>> {
+    this.#dividendHistory ??= createDividendHistory({
+      provider: this.#provider,
+      logger: this.#log.child({ mod: "dividend-history" }),
+      now: this.#now,
+    });
+    return this.#dividendHistory.get(symbols, fromDay);
+  }
+
+  #dailyCloses: DailyCloses | null = null;
+
+  /**
+   * Daily closes from `fromDay` to today for any symbols, watched or not (ADR 0024): stored daily
+   * history plus REST downloads of what is missing, and today's latest price.
+   */
+  getDailyCloses(symbols: readonly string[], fromDay: string): Promise<DailyClosesResult> {
+    this.#dailyCloses ??= createDailyCloses({
+      provider: this.#provider,
+      db: this.#db,
+      logger: this.#log.child({ mod: "daily-closes" }),
+      now: this.#now,
+    });
+    return this.#dailyCloses.get(symbols, fromDay);
   }
 
   async addSymbol(input: string): Promise<AddSymbolResult> {
@@ -372,6 +415,7 @@ export class MarketHub {
     const removed = await removeFromWatchlist(this.#db, symbol);
     if (!removed) return false;
     this.#watchlist = this.#watchlist.filter((entry) => entry !== symbol);
+    this.#alerts.forgetSymbol(symbol);
     this.#quotes.delete(symbol);
     this.#provider.unsubscribe([symbol]);
     this.#emitWatchlist();

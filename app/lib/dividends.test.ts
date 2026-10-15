@@ -6,6 +6,8 @@ import {
   type DividendPayment,
   dividendInfo,
   dividendTally,
+  dividendYield,
+  projectDividends,
   sharesHeldBefore,
   upcomingDividend,
 } from "./dividends";
@@ -79,8 +81,8 @@ describe("dividendInfo", () => {
   it("expects the next payment one usual gap after the last, at the latest amount", () => {
     const info = dividendInfo(quarterly, "2026-10-15");
     expect(info?.next).toMatchObject({ amount: 0.53, expected: true });
-    // Median gap 91 days after Aug 14.
-    expect(info?.next?.exDate).toBe("2026-11-13");
+    // Quarterly: three calendar months after Aug 14.
+    expect(info?.next?.exDate).toBe("2026-11-14");
   });
 
   it("moves an overdue estimate forward until it is after today", () => {
@@ -107,6 +109,26 @@ describe("dividendInfo", () => {
     const info = dividendInfo([pay("2026-06-01")], "2026-10-15");
     expect(info).toMatchObject({ frequency: "irregular", next: null });
   });
+
+  it("expects a month-end monthly payer in every calendar month, February included", () => {
+    // Ex-date mid-month, paid on the month's last business day (Jan 29 → gap ≈ 31 days).
+    const payments = [
+      ["2026-07-15", "2026-07-31"],
+      ["2026-08-14", "2026-08-31"],
+      ["2026-09-15", "2026-09-30"],
+      ["2026-10-15", "2026-10-30"],
+      ["2026-11-13", "2026-11-30"],
+      ["2026-12-15", "2026-12-31"],
+      ["2027-01-15", "2027-01-29"],
+    ].map(([exDate = "", payDate]) => pay(exDate, 0.27, { payDate }));
+    const info = dividendInfo(payments, "2027-02-03");
+    expect(info?.next).toMatchObject({ exDate: "2027-02-15", payDate: "2027-02-28" });
+    const months = (info ? projectDividends(info, "2027-02-03", "2028-02-02") : []).map((payment) =>
+      (payment.payDate ?? payment.exDate).slice(0, 7),
+    );
+    expect(months).toHaveLength(12);
+    expect(new Set(months).size).toBe(12);
+  });
 });
 
 describe("upcomingDividend", () => {
@@ -123,7 +145,7 @@ describe("upcomingDividend", () => {
   it("is the next payment once the last one is paid", () => {
     const info = dividendInfo(quarterly, "2026-10-15");
     expect(info && upcomingDividend(info, "2026-10-15")).toMatchObject({
-      exDate: "2026-11-13",
+      exDate: "2026-11-14",
       pending: false,
     });
   });
@@ -246,5 +268,47 @@ describe("sharesHeldBefore", () => {
     ] as const;
     expect(sharesHeldBefore(trades, "KO", "2026-10-10")).toBe(6);
     expect(sharesHeldBefore(trades, "KO", "2026-10-11")).toBe(13);
+  });
+});
+
+describe("dividendYield", () => {
+  const info = (frequency: "quarterly" | "irregular") => ({
+    frequency,
+    last: { exDate: "2026-08-14", payDate: "2026-09-01", amount: 0.5 },
+    next: { exDate: "2026-11-13", payDate: "2026-12-01", amount: 0.53, expected: false },
+  });
+  it("annualises the next amount over the price", () => {
+    expect(dividendYield(info("quarterly"), 70.67)).toBeCloseTo(3, 2);
+  });
+  it("is unknown without a price or a regular schedule", () => {
+    expect(dividendYield(info("quarterly"), null)).toBeNull();
+    expect(dividendYield(info("irregular"), 70)).toBeNull();
+  });
+});
+
+describe("projectDividends", () => {
+  it("projects a monthly payer into every calendar month, short months included", () => {
+    const info = {
+      frequency: "monthly" as const,
+      last: { exDate: "2026-09-29", payDate: "2026-09-30", amount: 0.34 },
+      next: { exDate: "2026-10-29", payDate: "2026-10-30", amount: 0.34, expected: true },
+    };
+    const months = projectDividends(info, "2026-10-15", "2027-10-15").map((payment) =>
+      payment.payDate?.slice(0, 7),
+    );
+    expect(months).toEqual([
+      "2026-10",
+      "2026-11",
+      "2026-12",
+      "2027-01",
+      "2027-02",
+      "2027-03",
+      "2027-04",
+      "2027-05",
+      "2027-06",
+      "2027-07",
+      "2027-08",
+      "2027-09",
+    ]);
   });
 });
