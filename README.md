@@ -8,6 +8,7 @@
 **A self-hosted, real-time ticker for NYSE & Nasdaq.**<br>
 Live prices, candlestick charts, portfolios and AI insight, all running on your own machine.
 
+![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-2563eb)
 ![Node 24](https://img.shields.io/badge/node-24_LTS-339933?logo=node.js&logoColor=white)
 ![React Router 8](https://img.shields.io/badge/React_Router-8-CA4245?logo=reactrouter&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
@@ -189,4 +190,4 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 
 ## Project docs
 
-[`CLAUDE.md`](CLAUDE.md) is the entry point for contributors and AI agents. Detailed guidelines and decision records live in [`ai/`](ai/README.md). Brand assets are in [`public/brand/`](public/brand).
+[`CLAUDE.md`](CLAUDE.md) is the entry point for contributors and AI agents. Detailed guidelines and decision records live in [`ai/`](ai/README.md). Brand assets are in [`public/brand/`](public/brand). Release notes are in [`CHANGELOG.md`](CHANGELOG.md) (current release: **1.0.0**).
