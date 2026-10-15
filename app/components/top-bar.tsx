@@ -51,12 +51,7 @@ export function TopBar({
   return (
     <header className="flex h-14 shrink-0 items-center gap-5 px-4 text-sm">
       <span className="flex items-center gap-2.5">
-        <span
-          aria-hidden
-          className="grid size-7 place-items-center rounded-lg bg-accent text-[13px] font-semibold text-white shadow-sm shadow-accent/30"
-        >
-          K
-        </span>
+        <img src="/brand/krestrel-mark.svg" alt="" aria-hidden className="size-7" />
         <span className="text-[15px] font-semibold tracking-tight text-text">Krestrel</span>
       </span>
 
@@ -138,11 +133,12 @@ function CurrencySelect() {
         {selected}
       </span>
       <CaretDownIcon aria-hidden size={12} weight="bold" />
-      {/* The native list stays (keyboard, search-by-typing); only its closed face is custom. */}
+      {/* The native list stays (keyboard, search-by-typing); only its closed face is custom. The
+          open list takes the select's colours (Windows), so they must be the theme's, not inherited. */}
       <select
         value={selected}
         onChange={(event) => setCurrency(event.target.value)}
-        className="absolute inset-0 cursor-pointer opacity-0"
+        className="absolute inset-0 cursor-pointer bg-panel text-text opacity-0 [&>option]:bg-panel [&>option]:text-text"
       >
         {codes.map((code) => (
           <option key={code} value={code}>

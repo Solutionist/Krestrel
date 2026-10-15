@@ -434,6 +434,11 @@ export function createAlpacaProvider(
     },
 
     async *getDailyBars(symbols, startDay, endDay) {
+      // Alpaca's date `end` is inclusive and covers that whole day. Sending `endDay` itself would
+      // reach into today's session, which the free plan rejects (403 "recent SIP data").
+      const lastDay = new Date(Date.parse(`${endDay}T00:00:00Z`) - 86_400_000)
+        .toISOString()
+        .slice(0, 10);
       for (let offset = 0; offset < symbols.length; offset += MAX_SYMBOLS) {
         const batch = symbols.slice(offset, offset + MAX_SYMBOLS);
         let pageToken: string | null = null;
@@ -443,7 +448,7 @@ export function createAlpacaProvider(
             symbols: batch.join(","),
             timeframe: "1Day",
             start: startDay,
-            end: endDay,
+            end: lastDay,
             limit: "10000",
             feed: "sip",
             // Split-adjusted so long-range charts don't show split cliffs.
@@ -452,10 +457,9 @@ export function createAlpacaProvider(
             ...(pageToken ? { page_token: pageToken } : {}),
           }).toString();
           const page = await readBody(await send(url), BarsPageSchema, "daily bars");
-          // Date `end` is inclusive at Alpaca; the contract is [startDay, endDay).
-          const bars = Object.entries(page.bars ?? {})
-            .flatMap(([symbol, rows]) => rows.map((row) => toDailyBar(symbol, row, HISTORY_SOURCE)))
-            .filter((bar) => bar.day < endDay);
+          const bars = Object.entries(page.bars ?? {}).flatMap(([symbol, rows]) =>
+            rows.map((row) => toDailyBar(symbol, row, HISTORY_SOURCE)),
+          );
           if (bars.length > 0) yield bars;
           pageToken = page.next_page_token ?? null;
         } while (pageToken);

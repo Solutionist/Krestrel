@@ -10,6 +10,7 @@ import type { Logger } from "pino";
 import * as z from "zod";
 
 import { parseConfig } from "../env-schema";
+import { type ResolvedCommand, resolveWindowsCommand } from "./resolve-command";
 import { type LlmClient, LlmError, type StructuredRequest, type StructuredResult } from "./types";
 
 const ClaudeCliConfigSchema = z.object({
@@ -28,9 +29,10 @@ const EnvelopeSchema = z.looseObject({
 });
 
 /**
- * Environment passed to the CLI: enough to find its install and the user's sign-in (HOME, macOS
- * keychain via USER), nothing of Krestrel's (no Alpaca keys, no DATABASE_URL, and no
- * ANTHROPIC_API_KEY, which would silently switch billing from the subscription to the API).
+ * Environment passed to the CLI: enough to find its install and the user's sign-in (HOME or
+ * USERPROFILE, macOS keychain via USER, Windows APPDATA/SystemRoot), nothing of Krestrel's (no
+ * Alpaca keys, no DATABASE_URL, and no ANTHROPIC_API_KEY, which would silently switch billing from
+ * the subscription to the API).
  */
 const PASSTHROUGH_ENV = [
   "HOME",
@@ -41,6 +43,12 @@ const PASSTHROUGH_ENV = [
   "LANG",
   "TMPDIR",
   "XDG_CONFIG_HOME",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "SystemRoot",
+  "TEMP",
+  "TMP",
 ];
 
 export interface SpawnResult {
@@ -59,8 +67,17 @@ export type RunProcess = (
 ) => Promise<SpawnResult>;
 
 const runProcess: RunProcess = (command, args, options) => {
+  let resolved: ResolvedCommand = { command, args: [] };
+  if (process.platform === "win32") {
+    try {
+      resolved = resolveWindowsCommand(command, options.env.PATH);
+    } catch (error) {
+      const spawnError = error as NodeJS.ErrnoException;
+      return Promise.resolve({ code: null, stdout: "", stderr: "", timedOut: false, spawnError });
+    }
+  }
   const { promise, resolve } = Promise.withResolvers<SpawnResult>();
-  const child = spawn(command, args, {
+  const child = spawn(resolved.command, [...resolved.args, ...args], {
     cwd: options.cwd,
     env: options.env,
     stdio: ["pipe", "pipe", "pipe"],

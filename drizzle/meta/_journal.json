@@ -22,6 +22,13 @@
       "when": 1791959620127,
       "tag": "0002_portfolios",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792041428473,
+      "tag": "0003_stock_profiles",
+      "breakpoints": true
     }
   ]
 }

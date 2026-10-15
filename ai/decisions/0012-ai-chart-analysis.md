@@ -23,7 +23,8 @@ The owner asked to use Claude "with the chart (using subscription)" to tag the b
 - "Ask Claude": the browser posts the exact displayed candles to `POST /api/analysis/:symbol`; the server re-runs the same analysis (so ids match the drawing), builds a compact numeric prompt (≤ 300 most recent candles + all candidates by id), and calls the LLM for a Zod-validated `ExplanationSchema` result. Comments about unknown ids are dropped.
 - LLM backend contract `app/.server/llm/types.ts` (`LlmClient.generateStructured`), registry `LLM_PROVIDER` (`claude-cli` | `none`). `claude-cli`:
   - `claude -p --output-format json --json-schema <draft-07, no $schema> --system-prompt … --tools "" --strict-mcp-config --disable-slash-commands --no-session-persistence [--model]`.
-  - Prompt on stdin; run in an empty scratch dir (no project CLAUDE.md/hooks/MCP); minimal env (HOME, USER, PATH, …). No Krestrel secrets, and no `ANTHROPIC_API_KEY`, which would switch billing to the API.
+  - Prompt on stdin; run in an empty scratch dir (no project CLAUDE.md/hooks/MCP); minimal env (HOME, USER, PATH, …; on Windows USERPROFILE, APPDATA, LOCALAPPDATA, SystemRoot, TEMP, TMP). No Krestrel secrets, and no `ANTHROPIC_API_KEY`, which would switch billing to the API.
+  - Windows: Node can't spawn npm's `claude.cmd` shim without a shell, and a shell can't safely quote the multi-line argv. `resolve-command.ts` resolves `CLAUDE_CLI_PATH` over PATH to `claude.exe` (following the shim's `%dp0%` target; `.js` targets run with Node).
   - The CLI reports failures with exit 0 and `is_error: true`; mapped to `not_signed_in`, `rate_limited`, `not_installed`, `timeout`, `invalid_output`, `busy` with plain-language messages.
   - One run at a time per process.
 

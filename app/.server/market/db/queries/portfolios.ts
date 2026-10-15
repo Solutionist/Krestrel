@@ -155,17 +155,18 @@ function draft(portfolioId: string, input: TradeInput): Trade {
   return { ...input, id: "draft", portfolioId, createdAt: new Date().toISOString() };
 }
 
-export function addTrade(
+/** Adds trades atomically: all are saved, or none (e.g. when one of them would oversell). */
+export function addTrades(
   db: Database,
   portfolioId: string,
-  input: TradeInput,
+  inputs: readonly TradeInput[],
 ): Promise<TradeWriteResult> {
   return writeChecked(
     db,
     portfolioId,
-    (current) => [...current, draft(portfolioId, input)],
+    (current) => [...current, ...inputs.map((input) => draft(portfolioId, input))],
     async (tx) => {
-      await tx.insert(trades).values({ ...input, portfolioId });
+      await tx.insert(trades).values(inputs.map((input) => ({ ...input, portfolioId })));
     },
   );
 }

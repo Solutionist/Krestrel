@@ -11,7 +11,9 @@ import { testDatabaseUrl } from "./url";
 export function setupTestDatabase(): Database {
   const db = createDatabase(testDatabaseUrl(), { max: 2 });
   beforeEach(async () => {
-    await db.execute(sql`TRUNCATE alerts, bars_1m, bars_1d, watchlist, trades, portfolios`);
+    await db.execute(
+      sql`TRUNCATE alerts, bars_1m, bars_1d, watchlist, trades, portfolios, stock_profiles`,
+    );
   });
   afterAll(async () => {
     await db.$client.end();

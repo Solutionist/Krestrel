@@ -82,7 +82,9 @@ export function createBackfiller(deps: BackfillDeps): Backfiller {
 
   async function runDaily(symbols: readonly string[]): Promise<void> {
     if (deps.dailyYears === 0) return;
-    const endDay = nyDay(now()); // exclusive: today comes from minute bars
+    // Exclusive: today comes from minute bars. Shifted by the history delay so the last included
+    // day has been over for at least that long (just after midnight, yesterday is still "recent").
+    const endDay = nyDay(now() - provider.historyDelayMs);
     const floorDay = nyDay(now() - deps.dailyYears * 365 * DAY);
     const starts: Array<[string, string]> = [];
     for (const symbol of symbols) {

@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 // Relative (not `~/`) because drizzle-kit loads this file without the tsconfig path alias.
+import type { IdeaCategory, Sector } from "../../../lib/ideas";
 import type { BarSource } from "../../../lib/market";
 
 // Prices: numeric(14,4) in Postgres, `number` in TypeScript (ADR 0008). Four decimals and
@@ -118,5 +119,25 @@ export const trades = pgTable(
     check("trades_price_check", sql`${t.price} >= 0`),
     check("trades_fee_check", sql`${t.fee} >= 0`),
     index("trades_portfolio_symbol_idx").on(t.portfolioId, t.symbol),
+  ],
+);
+
+/**
+ * Sector and type per ticker, for grouping holdings (ADR 0019). Filled by the owner's local model;
+ * rows with source "owner" are the owner's corrections and the model never overwrites them.
+ */
+export const stockProfiles = pgTable(
+  "stock_profiles",
+  {
+    symbol: text("symbol").primaryKey(),
+    /** GICS sector; null for funds/ETFs or when unknown. */
+    sector: text("sector").$type<Sector>(),
+    style: text("style").$type<IdeaCategory>(),
+    source: text("source").$type<"model" | "owner">().notNull(),
+    updatedAt: utc("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check("stock_profiles_source_check", sql`${t.source} IN ('model', 'owner')`),
+    check("stock_profiles_style_check", sql`${t.style} IN ('growth', 'dividend', 'risky')`),
   ],
 );

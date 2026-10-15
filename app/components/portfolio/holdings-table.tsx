@@ -1,3 +1,5 @@
+import { CaretDownIcon, CaretUpDownIcon, CaretUpIcon } from "@phosphor-icons/react";
+import { useState } from "react";
 import { Link } from "react-router";
 
 import { toneOf } from "~/components/ui/styles";
@@ -31,9 +33,30 @@ export function ChangePill({ value, fraction }: { value: number | null; fraction
 export const TH = "px-3 pb-2 text-xs font-medium text-muted";
 const NUMERIC = "px-3 py-2.5 text-right tabular-nums";
 
+type SortKey =
+  | "symbol"
+  | "shares"
+  | "averageCost"
+  | "lastPrice"
+  | "marketValue"
+  | "unrealized"
+  | "dayChange"
+  | "realized";
+
+const COLUMNS: ReadonlyArray<{ key: SortKey; label: string }> = [
+  { key: "symbol", label: "Symbol" },
+  { key: "shares", label: "Shares" },
+  { key: "averageCost", label: "Avg cost" },
+  { key: "lastPrice", label: "Last" },
+  { key: "marketValue", label: "Value" },
+  { key: "unrealized", label: "Unrealized P/L" },
+  { key: "dayChange", label: "Today" },
+  { key: "realized", label: "Realized" },
+];
+
 /**
- * Open positions by market value, then closed ones (realized P/L only). Amounts are converted to
- * the display currency; the symbol opens its chart.
+ * Open positions (sortable by any column; value, largest first, by default), then closed ones
+ * (realized P/L only). Amounts are converted to the display currency; the symbol opens its chart.
  */
 export function HoldingsTable({
   positions,
@@ -47,9 +70,20 @@ export function HoldingsTable({
   signals: Record<string, RsiSignal | null>;
   levels: RsiLevels;
 }) {
+  // Value, largest first, until the owner picks a column. Unknown values (no live price) sort last.
+  const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({
+    key: "marketValue",
+    descending: true,
+  });
   const open = positions
     .filter((position) => position.shares > 0)
-    .sort((a, b) => (b.marketValue ?? -1) - (a.marketValue ?? -1));
+    .sort((a, b) => {
+      const x = a[sort.key];
+      const y = b[sort.key];
+      if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+      const order = typeof x === "string" ? x.localeCompare(String(y)) : x - Number(y);
+      return sort.descending ? -order : order;
+    });
   const closed = positions.filter((position) => position.shares === 0);
 
   return (
@@ -58,30 +92,45 @@ export function HoldingsTable({
         <caption className="sr-only">Holdings</caption>
         <thead>
           <tr className="border-b border-rule/60">
-            <th scope="col" className={`${TH} text-left`}>
-              Symbol
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Shares
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Avg cost
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Last
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Value
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Unrealized P/L
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Today
-            </th>
-            <th scope="col" className={`${TH} text-right`}>
-              Realized
-            </th>
+            {COLUMNS.map(({ key, label }) => {
+              const active = sort.key === key;
+              const Arrow = active
+                ? sort.descending
+                  ? CaretDownIcon
+                  : CaretUpIcon
+                : CaretUpDownIcon;
+              return (
+                <th
+                  key={key}
+                  scope="col"
+                  aria-sort={active ? (sort.descending ? "descending" : "ascending") : "none"}
+                  className={`${TH} ${key === "symbol" ? "text-left" : "text-right"}`}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      // A new column starts A→Z for names and largest-first for numbers.
+                      setSort(
+                        active
+                          ? { key, descending: !sort.descending }
+                          : { key, descending: key !== "symbol" },
+                      )
+                    }
+                    className={`inline-flex items-center gap-1 rounded-md transition-colors duration-150 hover:text-text ${
+                      active ? "text-text" : ""
+                    }`}
+                  >
+                    {label}
+                    <Arrow
+                      aria-hidden
+                      size={11}
+                      weight="bold"
+                      className={active ? "text-accent" : "opacity-40"}
+                    />
+                  </button>
+                </th>
+              );
+            })}
             <th
               scope="col"
               className={`${TH} text-left`}

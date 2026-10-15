@@ -17,6 +17,8 @@ import type { Route } from "./+types/root";
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+  { rel: "icon", href: "/favicon.ico", sizes: "32x32 48x48" },
+  { rel: "apple-touch-icon", href: "/brand/krestrel-icon-180.png" },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {

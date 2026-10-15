@@ -1,5 +1,11 @@
-import { PencilSimpleIcon, TrashIcon, WalletIcon, WarningCircleIcon } from "@phosphor-icons/react";
-import { type FormEvent, type ReactNode, useCallback, useMemo, useState } from "react";
+import {
+  ImageSquareIcon,
+  PencilSimpleIcon,
+  TrashIcon,
+  WalletIcon,
+  WarningCircleIcon,
+} from "@phosphor-icons/react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useFetcher, useSearchParams } from "react-router";
 
 import { db } from "~/.server/market/db/instance";
@@ -8,6 +14,7 @@ import { getMarketHub } from "~/.server/market/instance";
 import { AppShell } from "~/components/app-shell";
 import { AverageCalculator } from "~/components/portfolio/average-calculator";
 import { ChangePill, HoldingsTable } from "~/components/portfolio/holdings-table";
+import { ImportHoldings } from "~/components/portfolio/import-holdings";
 import { type PortfolioEntry, PortfolioList } from "~/components/portfolio/portfolio-list";
 import { TradeForm } from "~/components/portfolio/trade-form";
 import { TradeHistory } from "~/components/portfolio/trade-history";
@@ -58,6 +65,25 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
   const timeZone = useTimeZone();
   const [params, setParams] = useSearchParams();
   const [editing, setEditing] = useState<Trade | null>(null);
+  // Open import panel; a fresh object per paste so the same image can be read again.
+  const [importing, setImporting] = useState<{ image: Blob | null } | null>(null);
+
+  // A screenshot pasted anywhere on the page goes straight to the import panel.
+  const hasPortfolios = portfolios.length > 0;
+  useEffect(() => {
+    if (!hasPortfolios) return;
+    function onPaste(event: ClipboardEvent) {
+      const item = [...(event.clipboardData?.items ?? [])].find(
+        (entry) => entry.kind === "file" && entry.type.startsWith("image/"),
+      );
+      const image = item?.getAsFile();
+      if (!image) return;
+      event.preventDefault();
+      setImporting({ image });
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [hasPortfolios]);
 
   const requested = params.get("p");
   // With one portfolio, "All" would just repeat it.
@@ -162,15 +188,33 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
             </div>
 
             <section aria-labelledby="holdings-heading" className="grid gap-3">
-              <h2 id="holdings-heading" className={HEADING}>
-                Holdings
-              </h2>
-              {positions.length === 0 ? (
-                <EmptyState
-                  title={<h3>Nothing held yet</h3>}
-                  hint="Record a buy below and it shows up here, priced live."
-                  inline
+              <div className="flex items-center justify-between gap-3">
+                <h2 id="holdings-heading" className={HEADING}>
+                  Holdings
+                </h2>
+                {!importing && (
+                  <Button variant="ghost" size="sm" onClick={() => setImporting({ image: null })}>
+                    <ImageSquareIcon aria-hidden size={14} />
+                    Import screenshot
+                  </Button>
+                )}
+              </div>
+              {importing && (
+                <ImportHoldings
+                  portfolios={portfolios}
+                  portfolioId={selectedId}
+                  image={importing.image}
+                  onClose={() => setImporting(null)}
                 />
+              )}
+              {positions.length === 0 ? (
+                !importing && (
+                  <EmptyState
+                    title={<h3>Nothing held yet</h3>}
+                    hint="Record a buy below, or paste a screenshot of your broker's holdings (Ctrl+V)."
+                    inline
+                  />
+                )
               ) : (
                 <HoldingsTable
                   positions={positions}

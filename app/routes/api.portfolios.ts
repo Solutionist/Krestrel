@@ -2,7 +2,7 @@ import * as z from "zod";
 
 import { db } from "~/.server/market/db/instance";
 import {
-  addTrade,
+  addTrades,
   createPortfolio,
   deletePortfolio,
   deleteTrade,
@@ -11,6 +11,8 @@ import {
   updateTrade,
 } from "~/.server/market/db/queries/portfolios";
 import { getMarketHub } from "~/.server/market/instance";
+import { crossSiteRejection } from "~/.server/same-origin";
+import { MAX_IMPORT_ROWS } from "~/lib/holdings-import";
 import { type PortfolioActionResult, PortfolioNameSchema, TradeInputSchema } from "~/lib/portfolio";
 
 import type { Route } from "./+types/api.portfolios";
@@ -22,16 +24,24 @@ const ActionSchema = z.discriminatedUnion("intent", [
   TradeInputSchema.extend({ intent: z.literal("addTrade"), portfolioId: z.uuid() }),
   TradeInputSchema.extend({ intent: z.literal("updateTrade"), id: z.uuid() }),
   z.object({ intent: z.literal("deleteTrade"), id: z.uuid() }),
+  z.object({
+    intent: z.literal("importTrades"),
+    portfolioId: z.uuid(),
+    trades: z.array(TradeInputSchema).min(1).max(MAX_IMPORT_ROWS),
+  }),
 ]);
 
 /**
  * POST /api/portfolios (JSON):
  *   { intent: "create", name } | { intent: "rename", id, name } | { intent: "delete", id }
  *   { intent: "addTrade", portfolioId, …trade } | { intent: "updateTrade", id, …trade }
- *   { intent: "deleteTrade", id }
+ *   { intent: "deleteTrade", id } | { intent: "importTrades", portfolioId, trades: trade[] }
  * Expected failures (duplicate name, overselling, …) return `{ ok: false, error }` with 4xx.
+ * Requests from other websites are refused (403) before anything is read.
  */
 export async function action({ request }: Route.ActionArgs) {
+  const refused = crossSiteRejection(request);
+  if (refused) return refused;
   const parsed = ActionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail(400, "invalid", parsed.error.issues[0]?.message ?? "Invalid request");
@@ -60,17 +70,45 @@ export async function action({ request }: Route.ActionArgs) {
       if (!watch.ok) return fail(422, "unknown_symbol", watch.message);
       const result: TradeWriteResult =
         input.intent === "addTrade"
-          ? await addTrade(db, input.portfolioId, trade)
+          ? await addTrades(db, input.portfolioId, [trade])
           : await updateTrade(db, input.id, trade);
-      return result.ok
-        ? respond({ ok: true, warning: watch.warning })
-        : fail(result.code === "oversell" ? 409 : 404, result.code, result.message);
+      const warning = watch.unpriced
+        ? `Saved, but ${symbol} has no live price yet: ${watch.unpriced}`
+        : undefined;
+      return tradeWriteResponse(result, warning);
+    }
+    case "importTrades": {
+      // Check every ticker before saving or watching anything, and name all misreads at once.
+      const symbols = [...new Set(input.trades.map((trade) => trade.symbol))];
+      const listed = await getMarketHub().verifyListed(symbols);
+      const unknown = symbols.filter((symbol) => listed.get(symbol) === null);
+      if (unknown.length > 0) {
+        return fail(
+          422,
+          "unknown_symbol",
+          `${unknown.join(", ")} ${unknown.length === 1 ? "isn't an active NYSE or Nasdaq listing" : "aren't active NYSE or Nasdaq listings"}. Fix or remove ${unknown.length === 1 ? "that row" : "those rows"}.`,
+        );
+      }
+      const unpriced: string[] = [];
+      let reason = "";
+      for (const symbol of symbols) {
+        const watch = await ensureWatched(symbol);
+        if (!watch.ok) return fail(422, "unknown_symbol", watch.message);
+        if (watch.unpriced) {
+          unpriced.push(symbol);
+          reason = watch.unpriced;
+        }
+      }
+      const result = await addTrades(db, input.portfolioId, input.trades);
+      const warning =
+        unpriced.length > 0
+          ? `Saved, but ${unpriced.join(", ")} ${unpriced.length === 1 ? "has" : "have"} no live price yet: ${reason}`
+          : undefined;
+      return tradeWriteResponse(result, warning);
     }
     case "deleteTrade": {
       const result = await deleteTrade(db, input.id);
-      return result.ok
-        ? respond({ ok: true })
-        : fail(result.code === "oversell" ? 409 : 404, result.code, result.message);
+      return tradeWriteResponse(result);
     }
   }
 }
@@ -78,11 +116,11 @@ export async function action({ request }: Route.ActionArgs) {
 /**
  * Holdings are priced from the live stream, which covers watchlist symbols only, so a traded
  * symbol joins the watchlist. Unknown tickers are refused; a full watchlist or an unreachable
- * provider still saves the trade, with a warning that the holding has no live price.
+ * provider still saves the trade, and `unpriced` says why the holding has no live price.
  */
 async function ensureWatched(
   symbol: string,
-): Promise<{ ok: true; warning?: string } | { ok: false; message: string }> {
+): Promise<{ ok: true; unpriced?: string } | { ok: false; message: string }> {
   const hub = getMarketHub();
   if (hub.snapshot().watchlist.includes(symbol)) return { ok: true };
   const added = await hub.addSymbol(symbol);
@@ -90,7 +128,7 @@ async function ensureWatched(
   if (added.code === "invalid" || added.code === "unknown") {
     return { ok: false, message: added.message };
   }
-  return { ok: true, warning: `Saved, but ${symbol} has no live price yet: ${added.message}` };
+  return { ok: true, unpriced: added.message };
 }
 
 function respond(result: PortfolioActionResult): Response {
@@ -101,4 +139,11 @@ function fail(status: number, code: string, message: string): Response {
   return Response.json({ ok: false, error: { code, message } } satisfies PortfolioActionResult, {
     status,
   });
+}
+
+/** A trade write's outcome: oversell is a 409 conflict, a missing trade or portfolio a 404. */
+function tradeWriteResponse(result: TradeWriteResult, warning?: string): Response {
+  return result.ok
+    ? respond({ ok: true, warning })
+    : fail(result.code === "oversell" ? 409 : 404, result.code, result.message);
 }

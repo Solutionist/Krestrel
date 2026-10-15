@@ -194,7 +194,7 @@ describe("Claude CLI client with a real child process", () => {
       expect(data.envKeys).not.toContain("ALPACA_SECRET_KEY");
       expect(data.envKeys).not.toContain("ANTHROPIC_API_KEY");
       expect(data.envKeys).not.toContain("DATABASE_URL");
-      expect(data.envKeys).toContain("HOME");
+      expect(data.envKeys).toContain(process.platform === "win32" ? "USERPROFILE" : "HOME");
     } finally {
       delete process.env.ALPACA_SECRET_KEY;
       delete process.env.ANTHROPIC_API_KEY;

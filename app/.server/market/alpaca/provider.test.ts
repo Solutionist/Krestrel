@@ -484,10 +484,7 @@ describe("Alpaca REST", () => {
     const { provider, requests } = restSetup([
       json({
         bars: {
-          AAPL: [
-            { t: "2026-10-12T04:00:00Z", o: 1, h: 2, l: 0.5, c: 1.5, v: 100, n: 10, vw: 1.2 },
-            { t: "2026-10-13T04:00:00Z", o: 1.5, h: 2.5, l: 1, c: 2, v: 200, n: 20, vw: 1.8 },
-          ],
+          AAPL: [{ t: "2026-10-12T04:00:00Z", o: 1, h: 2, l: 0.5, c: 1.5, v: 100, n: 10, vw: 1.2 }],
         },
         next_page_token: null,
       }),
@@ -511,6 +508,9 @@ describe("Alpaca REST", () => {
     expect(url?.searchParams.get("timeframe")).toBe("1Day");
     expect(url?.searchParams.get("adjustment")).toBe("split");
     expect(url?.searchParams.get("feed")).toBe("sip");
+    // Alpaca's date `end` is inclusive: asking for the excluded day would reach into a session
+    // that may still be running, which the free plan rejects with 403.
+    expect(url?.searchParams.get("end")).toBe("2026-10-12");
   });
 
   it("lists streamable equities, skipping ineligible and malformed entries", async () => {

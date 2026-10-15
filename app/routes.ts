@@ -11,6 +11,7 @@ export default [
   route("api/ideas", "routes/api.ideas.ts"),
   route("api/watchlist", "routes/api.watchlist.ts"),
   route("api/portfolios", "routes/api.portfolios.ts"),
+  route("api/portfolio-import", "routes/api.portfolio-import.ts"),
   route("api/fx", "routes/api.fx.ts"),
   route("api/signals", "routes/api.signals.ts"),
   route("api/health", "routes/api.health.ts"),

@@ -4,7 +4,7 @@ import type { TradeInput } from "~/lib/portfolio";
 
 import { setupTestDatabase } from "../../../../../tests/db/test-db";
 import {
-  addTrade,
+  addTrades,
   createPortfolio,
   deletePortfolio,
   deleteTrade,
@@ -48,7 +48,7 @@ describe("portfolios", () => {
 
   it("deletes a portfolio's trades with it", async () => {
     const id = await portfolio("Main");
-    await addTrade(db, id, buy(1, "2026-01-02"));
+    await addTrades(db, id, [buy(1, "2026-01-02")]);
 
     expect(await deletePortfolio(db, id)).toBe(true);
     expect(await listTrades(db)).toEqual([]);
@@ -58,7 +58,7 @@ describe("portfolios", () => {
 describe("trades", () => {
   it("round-trips fractional shares and fees", async () => {
     const id = await portfolio("Main");
-    await addTrade(db, id, { ...buy(0.123456, "2026-01-02"), price: 187.1234, fee: 1.5 });
+    await addTrades(db, id, [{ ...buy(0.123456, "2026-01-02"), price: 187.1234, fee: 1.5 }]);
 
     expect(await listTrades(db)).toMatchObject([
       { symbol: "AAPL", side: "buy", shares: 0.123456, price: 187.1234, fee: 1.5 },
@@ -68,23 +68,36 @@ describe("trades", () => {
   it("refuses a sell of more than was held on that date, per portfolio", async () => {
     const main = await portfolio("Main");
     const other = await portfolio("Other");
-    await addTrade(db, main, buy(5, "2026-01-10"));
+    await addTrades(db, main, [buy(5, "2026-01-10")]);
 
-    expect(await addTrade(db, main, sell(5, "2026-01-05"))).toMatchObject({
+    expect(await addTrades(db, main, [sell(5, "2026-01-05")])).toMatchObject({
       ok: false,
       code: "oversell",
     });
-    expect(await addTrade(db, other, sell(1, "2026-02-01"))).toMatchObject({
+    expect(await addTrades(db, other, [sell(1, "2026-02-01")])).toMatchObject({
       ok: false,
       code: "oversell",
     });
-    expect(await addTrade(db, main, sell(5, "2026-02-01"))).toEqual({ ok: true });
+    expect(await addTrades(db, main, [sell(5, "2026-02-01")])).toEqual({ ok: true });
+  });
+
+  it("saves a batch (a screenshot import) all or nothing", async () => {
+    const id = await portfolio("Main");
+    const msft = { ...buy(2, "2026-01-02"), symbol: "MSFT" };
+
+    expect(
+      await addTrades(db, id, [buy(3, "2026-01-02"), msft, sell(9, "2026-01-05")]),
+    ).toMatchObject({ ok: false, code: "oversell" });
+    expect(await listTrades(db)).toEqual([]);
+
+    expect(await addTrades(db, id, [buy(3, "2026-01-02"), msft])).toEqual({ ok: true });
+    expect((await listTrades(db)).map((trade) => trade.symbol).sort()).toEqual(["AAPL", "MSFT"]);
   });
 
   it("refuses edits and deletes that would leave a later sell uncovered", async () => {
     const id = await portfolio("Main");
-    await addTrade(db, id, buy(5, "2026-01-02"));
-    await addTrade(db, id, sell(4, "2026-02-01"));
+    await addTrades(db, id, [buy(5, "2026-01-02")]);
+    await addTrades(db, id, [sell(4, "2026-02-01")]);
     const buyId = (await listTrades(db)).find((trade) => trade.side === "buy")?.id ?? "";
 
     expect(await deleteTrade(db, buyId)).toMatchObject({ ok: false, code: "oversell" });
@@ -101,18 +114,20 @@ describe("trades", () => {
 
   it("serializes concurrent sells so they can't both spend the same shares", async () => {
     const id = await portfolio("Main");
-    await addTrade(db, id, buy(5, "2026-01-02"));
+    await addTrades(db, id, [buy(5, "2026-01-02")]);
 
     const results = await Promise.all([
-      addTrade(db, id, sell(4, "2026-02-01")),
-      addTrade(db, id, sell(4, "2026-02-01")),
+      addTrades(db, id, [sell(4, "2026-02-01")]),
+      addTrades(db, id, [sell(4, "2026-02-01")]),
     ]);
     expect(results.filter((result) => result.ok)).toHaveLength(1);
   });
 
   it("reports missing trades and portfolios", async () => {
     const missing = "00000000-0000-7000-8000-000000000000";
-    expect(await addTrade(db, missing, buy(1, "2026-01-02"))).toMatchObject({ code: "not_found" });
+    expect(await addTrades(db, missing, [buy(1, "2026-01-02")])).toMatchObject({
+      code: "not_found",
+    });
     expect(await deleteTrade(db, missing)).toMatchObject({ code: "not_found" });
   });
 });

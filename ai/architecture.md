@@ -40,6 +40,7 @@ Upstream REST ────────►│   getBars / getSnapshots / getClock
 | `app/.server/market/backfill.ts` | Incremental history backfill, serialized, every 15 min + on add |
 | `app/.server/market/instance.ts` | `getMarketHub()` — the only way to reach market data |
 | `app/lib/portfolio.ts` | Trade ledger maths: `computePositions` (average cost, oversell check), `mergePositions`, `valuePosition`, `portfolioTotals` (ADR 0013) |
+| `app/.server/portfolio-import/vision.ts` | Holdings from a broker screenshot: `readHoldingsFromImage` (open vision model on the owner's loopback Ollama, JSON-schema answer, Zod-validated), `cleanHoldings` (ticker normalising, null misreads, de-dupe) (ADR 0018) |
 | `app/lib/rsi-signal.ts` | RSI levels schema, `rsiSignal`/`rsiCrosses` (zones and buy/sell when RSI leaves a zone), `liveCloses` (ADR 0014) |
 | `app/lib/currency.ts` | Display currency: `formatMoney`, `currencyName`, `/api/fx` schema |
 | `app/.server/fx/` | `FxRateCache`: ECB daily USD rates via Frankfurter, 6 h cache, stale-on-failure (ADR 0013) |
@@ -52,7 +53,7 @@ Upstream REST ────────►│   getBars / getSnapshots / getClock
 | `app/.server/analysis/ideas.ts` | Ideas: starting mix (`openPositions` across portfolios, `holdingWeights` by value, cost basis when unpriced), prompt (symbols + percent weights only, focus, web-research task), `sanitizeIdeas` (valid unique tickers, not held, in focus, budgets, http(s) sources, ≤ 10), `generateIdeas` |
 | `app/.server/startup.ts` | Boot: migrations → hub start → SIGTERM/SIGINT shutdown |
 | `app/entry.server.tsx` | Calls `await startServer()` at module scope |
-| `app/routes/api.*.ts` | `stream` (SSE), `bars.$symbol` (JSON), `outlook.$symbol` (AI outlook), `ideas` (AI stock ideas), `watchlist` and `portfolios` (actions), `signals`, `fx`, `health` |
+| `app/routes/api.*.ts` | `stream` (SSE), `bars.$symbol` (JSON), `outlook.$symbol` (AI outlook), `ideas` (AI stock ideas), `watchlist` and `portfolios` (actions), `portfolio-import` (screenshot → holdings via local vision model), `signals`, `fx`, `health` |
 
 ## Startup and singleton (ADR 0004)
 
@@ -86,10 +87,13 @@ Plus `: ping` every 15 s. Headers include `Cache-Control: no-cache, no-transform
 | `/api/ideas` | POST | `IdeasRequest` `{ focus? (diversify \| GICS sector), model? }` → `{ ok, provider, model, focus, basis, holdings, sectorWeights, summary, suggestedSectors, ideas, generatedAt }`. Starting mix: open holdings across all portfolios weighted by value (basis `portfolio`), else the watchlist equally weighted (`watchlist`), else `none`; only symbols and percent weights go to Claude. Claude runs with only `WebSearch`/`WebFetch` (5 min timeout); the answer is schema-validated and sanitised, then every ticker is checked against the provider listing (loaded in the background while Claude works; per-ticker lookups when it can't load): unlisted ones are dropped, ones that couldn't be checked are kept with an empty `exchange`, quoted without subscribing, and flagged `watched` (ADR 0017). Errors as `/api/outlook` plus `invalid_output` 502 when fewer than 3 listed ideas survive |
 | `/api/watchlist` | GET | `{ symbols, provider }` |
 | `/api/watchlist` | POST | JSON or form: `{intent:"add",symbol}` / `remove` / `reorder` (`symbols[]`). Typed errors: `invalid`/`unknown` 422, `duplicate` 422, `limit` 409, `upstream` 502, `stale` 409 |
-| `/api/portfolios` | POST | JSON: `{intent:"create",name}` / `rename` (`id,name`) / `delete` (`id`) / `addTrade` (`portfolioId`, trade) / `updateTrade` (`id`, trade) / `deleteTrade` (`id`); trade = `{symbol, side, shares, price, fee, tradedOn}` in USD. Recording a trade adds the symbol to the watchlist. Typed errors: `invalid` 400, `duplicate` 409, `oversell` 409, `unknown_symbol` 422, `not_found` 404; `{ok:true, warning}` when saved but unpriced |
+| `/api/portfolios` | POST | JSON: `{intent:"create",name}` / `rename` (`id,name`) / `delete` (`id`) / `addTrade` (`portfolioId`, trade) / `updateTrade` (`id`, trade) / `deleteTrade` (`id`) / `importTrades` (`portfolioId`, `trades[≤100]`, all or nothing); trade = `{symbol, side, shares, price, fee, tradedOn}` in USD. Recording a trade adds the symbol to the watchlist. Typed errors: `invalid` 400, `duplicate` 409, `oversell` 409, `unknown_symbol` 422, `not_found` 404; `{ok:true, warning}` when saved but unpriced |
+| `/api/portfolio-import` | POST | multipart `image` (PNG/JPEG/WebP ≤ 20 MB, shrunk to ≤ 3.2 MP in the browser) → `{ok:true, holdings:[{symbol, shares\|null, averageCost\|null}], warning?}` (warning when costs aren't USD); saves nothing. Errors: `invalid` 400, `too_large` 413, `unsupported` 415, `nothing_found` 422, `unavailable`/`model_missing`/`config` 503, `timeout` 504, `invalid_output`/`failed` 502 (ADR 0018) |
 | `/api/signals` | GET | `{series: {SYMBOL: {closes (≈1 year of daily closes, oldest first), lastTime}}}` for watchlist symbols; the browser computes daily RSI signals with live prices (ADR 0014) |
 | `/api/fx` | GET | `{ok:true, fx:{rates (per 1 USD, incl. USD), date, source}}` or 502 `{ok:false,error}` |
 | `/api/health` | GET | 200/503 by DB; includes upstream status |
+
+`/api/portfolios` and `/api/portfolio-import` refuse requests sent by pages from another origin (`crossSiteRejection` in `app/.server/same-origin.ts`: `Sec-Fetch-Site`, else `Origin` vs. host → 403 `cross_site`). Browsers send `text/plain` and multipart POSTs to 127.0.0.1 without a CORS preflight, so without this any website could run these actions. Clients without those headers (curl, tests) pass.
 
 ## Reconnect strategy
 

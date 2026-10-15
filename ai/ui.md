@@ -125,3 +125,7 @@ Main: "Stock ideas" + basis line ("Based on your portfolio" / "Based on your wat
 ## Copy
 
 Plain, active voice, says what to do next. "Alpaca rejected the API keys. Check .env and restart." not "Authentication error occurred."
+
+## Brand
+
+Krestrel K mark (stem, rising stroke, leg, two candlesticks), emerald gradient #14e8a6 → #07805c; tagline "LOCAL TRADING PLATFORM". Assets in `public/brand/`: `krestrel-mark.svg` (header), `krestrel-logo.svg` (mark + wordmark, wordmark uses currentColor), `krestrel-icon-{dark,light}.svg`, PNG icons 180/192/512. `public/favicon.svg` / `favicon.ico` are the dark app icon. The UI accent stays blue: emerald is the rise colour.

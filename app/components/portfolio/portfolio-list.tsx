@@ -88,7 +88,7 @@ export function PortfolioList({
         <label className={LABEL} htmlFor="new-portfolio">
           New portfolio
         </label>
-        <div className="flex gap-2">
+        <div className="flex min-w-0 gap-2">
           <input
             id="new-portfolio"
             value={name}
