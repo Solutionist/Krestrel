@@ -278,7 +278,7 @@ function Summary({
           ) : (
             <>
               <Direction value={difference} />
-              {formatPercentChange(difference).replace("%", " pts")}
+              {formatPercentChange(difference).replace(/%$/, " pts")}
             </>
           )
         }

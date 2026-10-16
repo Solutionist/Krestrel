@@ -17,9 +17,10 @@ export const themePreference = createStoredValue<ThemePreference>(
 
 /**
  * Inline script for <head>: sets html[data-theme] before first paint so a dark-mode visitor never
- * sees a light flash. Mirrors `resolveTheme`; keep the two in step.
+ * sees a light flash. Mirrors `resolveTheme`; keep the two in step. The storage key is written out
+ * literally (it must equal STORAGE_KEY) so no value is ever spliced into script source.
  */
-export const THEME_SCRIPT = `(()=>{try{var p=localStorage.getItem(${JSON.stringify(STORAGE_KEY)});var d=p==="dark"||(p!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light"}catch(e){}})()`;
+export const THEME_SCRIPT = `(()=>{try{var p=localStorage.getItem("krestrel.theme");var d=p==="dark"||(p!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=d?"dark":"light"}catch(e){}})()`;
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
