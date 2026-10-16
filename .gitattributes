@@ -1,0 +1,4 @@
+# Text is LF on every OS (Biome formats with LF; Windows checkouts were CRLF).
+* text=auto eol=lf
+*.png binary
+*.ico binary
