@@ -150,7 +150,7 @@ export function ChartToolbar({
           pressed={sidePanel === "outlook"}
           aria-controls="chart-outlook"
           onClick={() => onTogglePanel("outlook")}
-          title="Claude's outlook from news, analyst ratings and this chart, in a panel beside it"
+          title="AI outlook from news and this chart's levels, in a panel beside it"
         >
           <SparkleIcon aria-hidden size={14} weight="fill" className="text-accent" />
           AI outlook

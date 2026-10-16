@@ -19,8 +19,13 @@ export const DIRECTION_TEXT: Record<PriceChange["direction"], string> = {
   flat: "text-muted",
 };
 
-/** Flashes when the last price changes (CSS disables the animation under reduced motion). */
-function usePriceFlash(price: number | null): "flash-rise" | "flash-fall" | "" {
+/**
+ * Flashes when the last price changes (CSS disables the animation under reduced motion). Key the
+ * price element on `key` so every tick restarts the animation, even in the same direction.
+ */
+function usePriceFlash(
+  price: number | null,
+): { className: "flash-rise" | "flash-fall"; key: number } | null {
   const previous = useRef(price);
   const [flash, setFlash] = useState<{
     className: "flash-rise" | "flash-fall";
@@ -37,7 +42,7 @@ function usePriceFlash(price: number | null): "flash-rise" | "flash-fall" | "" {
     const timer = setTimeout(() => setFlash(null), 700);
     return () => clearTimeout(timer);
   }, [price]);
-  return flash?.className ?? "";
+  return flash;
 }
 
 export function WatchlistRow({
@@ -68,7 +73,10 @@ export function WatchlistRow({
           </span>
         )}
       </span>
-      <span className={`text-right font-medium tabular-nums text-text ${flash}`}>
+      <span
+        key={flash?.key ?? 0}
+        className={`text-right font-medium tabular-nums text-text ${flash?.className ?? ""}`}
+      >
         {quote.lastPrice === null ? "—" : formatPrice(quote.lastPrice)}
       </span>
       <span className="sr-only">

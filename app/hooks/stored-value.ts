@@ -3,6 +3,10 @@ import { useSyncExternalStore } from "react";
 export interface StoredValue<T> {
   /** Current value and setter; server render and hydration use the fallback. */
   use(): [T, (value: T) => void];
+  /** Current value outside React; the fallback on the server. */
+  get(): T;
+  /** Same as the setter from `use()`. */
+  set(value: T): void;
 }
 
 /**
@@ -19,6 +23,8 @@ export function createStoredValue<T>(
   // getSnapshot must return the same reference until the stored text changes.
   let cachedRaw: string | null = null;
   let cachedValue = fallback;
+  // Text of the last write that storage refused; it wins over storage until reload.
+  let memoryRaw: string | undefined;
 
   const subscribe = (listener: () => void) => {
     listeners.add(listener);
@@ -30,12 +36,14 @@ export function createStoredValue<T>(
   };
 
   const read = (): T => {
+    if (typeof window === "undefined") return fallback;
     let raw: string | null = null;
     try {
       raw = localStorage.getItem(key);
     } catch {
       // Storage disabled: fall back.
     }
+    if (memoryRaw !== undefined) raw = memoryRaw;
     if (raw !== cachedRaw) {
       cachedRaw = raw;
       cachedValue = raw === null ? fallback : (parse(raw) ?? fallback);
@@ -44,17 +52,20 @@ export function createStoredValue<T>(
   };
 
   const write = (value: T) => {
+    const text = serialize(value);
     try {
-      localStorage.setItem(key, serialize(value));
+      localStorage.setItem(key, text);
+      memoryRaw = undefined;
     } catch {
-      // Storage full or disabled: the value lasts until reload.
-      cachedRaw = serialize(value);
-      cachedValue = value;
+      // Storage full or disabled: this setting lasts until reload.
+      memoryRaw = text;
     }
     for (const listener of listeners) listener();
   };
 
   return {
     use: () => [useSyncExternalStore(subscribe, read, () => fallback), write],
+    get: read,
+    set: write,
   };
 }

@@ -10,6 +10,7 @@ import { SectorMix } from "~/components/ideas/sector-mix";
 import { TopBar } from "~/components/top-bar";
 import { Button } from "~/components/ui/button";
 import { CARD, HEADING } from "~/components/ui/styles";
+import { createStoredValue } from "~/hooks/stored-value";
 import { useAiChoice } from "~/hooks/use-ai";
 import { useDividends } from "~/hooks/use-dividends";
 import { type MarketState, useMarketStream } from "~/hooks/use-market-stream";
@@ -37,7 +38,13 @@ type Request =
   | { kind: "loading"; focus: Focus }
   | { kind: "error"; focus: Focus; message: string };
 
-const CONSENT_KEY = "krestrel.ideasConsent";
+/** Consent to send holdings to Claude for ideas; saved as "yes" (survives blocked storage). */
+const ideasConsent = createStoredValue<boolean>(
+  "krestrel.ideasConsent",
+  false,
+  (raw) => (raw === "yes" ? true : null),
+  (value) => (value ? "yes" : "no"),
+);
 /** Last successful result per focus, so coming back shows it (JSON `{ [focus]: IdeasResponse }`). */
 const RESULTS_KEY = "krestrel.ideas";
 
@@ -109,12 +116,12 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
 
   async function findIdeas() {
     // Only Claude sends anything about holdings off this computer (tickers and weights).
-    if (ideasAi.provider === "claude" && localStorage.getItem(CONSENT_KEY) !== "yes") {
+    if (ideasAi.provider === "claude" && !ideasConsent.get()) {
       const ok = window.confirm(
         "Find ideas sends the tickers you hold and their share of your portfolio (no amounts or share counts) to Anthropic via your Claude Code CLI; Claude also searches the web. Continue?",
       );
       if (!ok) return;
-      localStorage.setItem(CONSENT_KEY, "yes");
+      ideasConsent.set(true);
     }
     const asked = focus;
     const id = ++requestId.current;
@@ -168,7 +175,11 @@ export default function IdeasPage({ loaderData }: Route.ComponentProps) {
       }
     >
       <main id="main" className={`${CARD} min-h-0 overflow-y-auto`}>
-        <div aria-live="polite" className="mx-auto grid max-w-[1180px] gap-6 px-6 py-6 text-sm">
+        <div className="mx-auto grid max-w-[1180px] gap-6 px-6 py-6 text-sm">
+          {/* Announces only the request outcome; live prices tick inside the results below. */}
+          <p role="status" className="sr-only">
+            {loading ? "Finding ideas…" : error ? error : result ? "Ideas ready" : ""}
+          </p>
           <header className="grid gap-1">
             <h1 className="text-lg font-semibold tracking-tight text-text">Stock ideas</h1>
             <p className="text-sm text-muted tabular-nums">

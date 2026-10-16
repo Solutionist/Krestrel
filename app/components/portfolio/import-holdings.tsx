@@ -97,6 +97,8 @@ export function ImportHoldings({
   const saving = saver.state !== "idle";
   const readResult = reader.data;
   const saveResult = saver.data;
+  // A failed save's error belongs to the rows it tried to save; replacing them hides it.
+  const [dismissedSave, setDismissedSave] = useState<PortfolioActionResult>();
   const { submit } = reader;
   const { choice } = useAiChoice("import");
 
@@ -185,6 +187,7 @@ export function ImportHoldings({
       const id = ++readId.current;
       const current = () => id === readId.current;
       setProblem(null);
+      setDismissedSave(saveResult);
       setRows(null);
       setAwaitingRead(null);
       setSaved(null);
@@ -239,7 +242,7 @@ export function ImportHoldings({
         }
       }
     },
-    [send, choice],
+    [send, choice, saveResult],
   );
 
   useEffect(() => {
@@ -326,7 +329,9 @@ export function ImportHoldings({
 
   const message =
     problem?.message ??
-    (saveResult && !saveResult.ok && !saving ? saveResult.error.message : null) ??
+    (saveResult && saveResult !== dismissedSave && !saveResult.ok && !saving
+      ? saveResult.error.message
+      : null) ??
     (awaitingRead &&
     readResult !== awaitingRead.before &&
     readResult &&
@@ -616,7 +621,13 @@ export function ImportHoldings({
                 ? "Importing…"
                 : `Import ${rows.length} ${rows.length === 1 ? "holding" : "holdings"}`}
             </Button>
-            <Button variant="ghost" onClick={() => setRows(null)}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setDismissedSave(saveResult);
+                setRows(null);
+              }}
+            >
               Use another screenshot
             </Button>
           </div>

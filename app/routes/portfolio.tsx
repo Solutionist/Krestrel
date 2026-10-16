@@ -39,6 +39,7 @@ import { TradeForm } from "~/components/portfolio/trade-form";
 import { TradeHistory } from "~/components/portfolio/trade-history";
 import { TopBar } from "~/components/top-bar";
 import { Button, IconButton } from "~/components/ui/button";
+import { Direction } from "~/components/ui/direction";
 import { CARD, FIELD, LABEL, toneOf } from "~/components/ui/styles";
 import { TabBar } from "~/components/ui/tab-bar";
 import { type DisplayCurrency, useCurrency } from "~/hooks/use-currency";
@@ -274,7 +275,7 @@ export default function PortfolioPage({ loaderData }: Route.ComponentProps) {
         ) : (
           <div className="mx-auto grid max-w-[1180px] gap-6 px-6 py-6">
             <div className="grid gap-5">
-              <PortfolioHeader portfolio={selected} />
+              <PortfolioHeader key={selected?.id ?? "all"} portfolio={selected} />
               <Summary totals={totals} display={display} />
               {dividends && tally && (
                 <DividendIncome
@@ -526,17 +527,23 @@ function Stat({
   value,
   detail,
   tone = "text-text",
+  direction,
 }: {
   label: string;
   value: string;
   detail?: ReactNode;
   tone?: string;
+  /** Signed amount whose ▲/▼ goes before `value`, so the sign never relies on colour. */
+  direction?: number;
 }) {
   return (
     <div className="grid content-start gap-1 bg-subtle px-4 py-3">
       <dt className={LABEL}>{label}</dt>
       <dd className="flex flex-wrap items-center gap-2">
-        <span className={`text-lg font-semibold tracking-tight tabular-nums ${tone}`}>{value}</span>
+        <span className={`text-lg font-semibold tracking-tight tabular-nums ${tone}`}>
+          {direction !== undefined && <Direction value={direction} />}
+          {value}
+        </span>
         {detail}
       </dd>
     </div>
@@ -558,6 +565,7 @@ function Summary({ totals, display }: { totals: PortfolioTotals; display: Displa
           <dt className={LABEL}>Today</dt>
           <dd className="flex items-center gap-2">
             <span className={`text-sm font-medium tabular-nums ${toneOf(totals.dayChange)}`}>
+              {totals.dayChangeFraction === null && <Direction value={totals.dayChange} />}
               {display.money(totals.dayChange, true)}
             </span>
             {totals.dayChangeFraction !== null && (
@@ -570,6 +578,7 @@ function Summary({ totals, display }: { totals: PortfolioTotals; display: Displa
         <Stat
           label="Unrealized P/L"
           value={display.money(totals.unrealized, true)}
+          direction={totals.unrealizedFraction === null ? totals.unrealized : undefined}
           detail={
             totals.unrealizedFraction !== null && (
               <ChangePill value={totals.unrealized} fraction={totals.unrealizedFraction} />
@@ -580,9 +589,15 @@ function Summary({ totals, display }: { totals: PortfolioTotals; display: Displa
         <Stat
           label="Realized P/L"
           value={display.money(totals.realized, true)}
+          direction={totals.realized}
           tone={toneOf(totals.realized)}
         />
-        <Stat label="Total P/L" value={display.money(total, true)} tone={toneOf(total)} />
+        <Stat
+          label="Total P/L"
+          value={display.money(total, true)}
+          direction={total}
+          tone={toneOf(total)}
+        />
         <Stat label="Cost of holdings" value={display.money(totals.costBasis)} />
       </dl>
       <p className="text-xs text-muted">

@@ -12,6 +12,7 @@ import {
 } from "lightweight-charts";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
+import { Direction } from "~/components/ui/direction";
 import type { DisplayCurrency } from "~/hooks/use-currency";
 import { useDailyCloses } from "~/hooks/use-performance";
 import { useThemeVersion } from "~/hooks/use-theme";
@@ -170,17 +171,6 @@ function PerformanceBody({
           ` Couldn't download all price history for ${data.incomplete.join(", ")}, so some days use an older price; reload to try again.`}
       </p>
     </div>
-  );
-}
-
-/** ▲/▼ with screen-reader text, so the direction never relies on colour. */
-function Direction({ value }: { value: number }) {
-  if (Math.abs(value) < 1e-9) return null;
-  return (
-    <>
-      <span aria-hidden>{value > 0 ? "▲ " : "▼ "}</span>
-      <span className="sr-only">{value > 0 ? "up " : "down "}</span>
-    </>
   );
 }
 

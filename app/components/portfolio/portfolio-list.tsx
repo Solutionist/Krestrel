@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 
 import { Button } from "~/components/ui/button";
+import { Direction } from "~/components/ui/direction";
 import { CARD, FIELD, HEADING, LABEL, toneOf } from "~/components/ui/styles";
 import type { DisplayCurrency } from "~/hooks/use-currency";
 import { formatPercentChange } from "~/lib/format";
@@ -79,9 +80,14 @@ export function PortfolioList({
               <span
                 className={`col-start-2 text-right text-xs tabular-nums ${toneOf(entry.totals.unrealized)}`}
               >
-                {entry.totals.unrealizedFraction === null
-                  ? "—"
-                  : formatPercentChange(entry.totals.unrealizedFraction)}
+                {entry.totals.unrealizedFraction === null ? (
+                  "—"
+                ) : (
+                  <>
+                    <Direction value={entry.totals.unrealizedFraction} />
+                    {formatPercentChange(entry.totals.unrealizedFraction)}
+                  </>
+                )}
               </span>
             </button>
           );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeMarket } from "./status-text";
+import { describeConnection, describeMarket } from "./status-text";
 
 // Wed 21 Oct 2026: New York is on EDT (UTC−4), Bangkok is UTC+7 (11 hours ahead).
 const OPEN_WED = Date.UTC(2026, 9, 21, 13, 30); // 09:30 ET = 20:30 Bangkok
@@ -49,5 +49,27 @@ describe("describeMarket", () => {
     const tuesday = Date.UTC(2026, 9, 20, 12, 0);
     expect(describeMarket(clock, null, tuesday).detail).toBe("opens Wed 09:30 ET");
     expect(describeMarket(clock, "America/New_York", tuesday).detail).toBe("opens Wed 09:30 ET");
+  });
+});
+
+describe("describeConnection", () => {
+  const reconnecting = {
+    state: "reconnecting" as const,
+    reason: "Lost the market data connection.",
+    code: null,
+    retryAt: Date.UTC(2026, 9, 21, 13, 30, 10),
+  };
+
+  it("counts down to the next retry once the time is known", () => {
+    const now = Date.UTC(2026, 9, 21, 13, 30, 0);
+    expect(describeConnection("open", reconnecting, now).message).toBe(
+      "Lost the market data connection. Retrying in 10 s.",
+    );
+  });
+
+  it("leaves the countdown out while the time is unknown (server render and hydration)", () => {
+    const message = describeConnection("open", reconnecting, null).message;
+    expect(message).toBe("Lost the market data connection.");
+    expect(message).not.toContain("Retrying");
   });
 });

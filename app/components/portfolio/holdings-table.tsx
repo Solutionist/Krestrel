@@ -2,6 +2,7 @@ import { CaretDownIcon, CaretUpDownIcon, CaretUpIcon } from "@phosphor-icons/rea
 import { useState } from "react";
 import { Link } from "react-router";
 
+import { Direction } from "~/components/ui/direction";
 import { toneOf } from "~/components/ui/styles";
 import { createStoredValue } from "~/hooks/stored-value";
 import type { DisplayCurrency } from "~/hooks/use-currency";
@@ -52,6 +53,7 @@ export function ChangePill({ value, fraction }: { value: number | null; fraction
     <span
       className={`inline-flex rounded-md px-1.5 py-0.5 text-xs font-medium tabular-nums ${tone} ${TINT[tone] ?? ""}`}
     >
+      {value !== null && <Direction value={value} />}
       {formatPercentChange(fraction)}
     </span>
   );
@@ -255,6 +257,7 @@ export function HoldingsTable({
                 <td className={NUMERIC}>0</td>
                 <td className={NUMERIC} colSpan={5} />
                 <td className={`${NUMERIC} ${toneOf(position.realized)}`}>
+                  <Direction value={position.realized} />
                   {display.money(position.realized, true)}
                 </td>
                 <td />
@@ -396,7 +399,10 @@ function OpenRow({
           "—"
         ) : (
           <span className="inline-flex items-center justify-end gap-2">
-            {display.money(position.unrealized, true)}
+            <span>
+              {position.unrealizedFraction === null && <Direction value={position.unrealized} />}
+              {display.money(position.unrealized, true)}
+            </span>
             {position.unrealizedFraction !== null && (
               <ChangePill value={position.unrealized} fraction={position.unrealizedFraction} />
             )}
@@ -404,10 +410,24 @@ function OpenRow({
         )}
       </td>
       <td className={`${NUMERIC} ${toneOf(position.dayChange)}`}>
-        {position.dayChange === null ? "—" : display.money(position.dayChange, true)}
+        {position.dayChange === null ? (
+          "—"
+        ) : (
+          <>
+            <Direction value={position.dayChange} />
+            {display.money(position.dayChange, true)}
+          </>
+        )}
       </td>
       <td className={`${NUMERIC} ${toneOf(position.realized)}`}>
-        {position.realized === 0 ? "—" : display.money(position.realized, true)}
+        {position.realized === 0 ? (
+          "—"
+        ) : (
+          <>
+            <Direction value={position.realized} />
+            {display.money(position.realized, true)}
+          </>
+        )}
       </td>
       <td className="px-3 py-2.5">
         <RsiSignalBadge signal={signal} levels={levels} compact />

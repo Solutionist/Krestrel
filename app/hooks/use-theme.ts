@@ -34,11 +34,14 @@ function resolveTheme(preference: ThemePreference): "light" | "dark" {
  */
 export function useApplyTheme(): void {
   const [preference] = themePreference.use();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `preference` is the re-apply trigger; `apply` reads the store itself.
   useEffect(() => {
     const root = document.documentElement;
     let fade = 0;
     const apply = () => {
-      const next = resolveTheme(preference);
+      // Read the store, not the render value: during hydration `preference` is still the
+      // server fallback, and applying it would flip the theme set by THEME_SCRIPT.
+      const next = resolveTheme(themePreference.get());
       if (root.dataset.theme === next) return;
       root.classList.add("theme-transition");
       root.dataset.theme = next;

@@ -41,12 +41,13 @@ export interface MarketText {
 /**
  * `timeZone` is the viewer's (null while unknown, e.g. during server render): phase changes
  * are shown in their local time with New York time in brackets, e.g. "opens Wed 20:30 (09:30 ET)".
- * A weekday is added whenever the change falls on another local day than `now`.
+ * A weekday is added whenever the change falls on another local day than `now` (always while
+ * `now` is null, i.e. during server render and hydration).
  */
 export function describeMarket(
   clock: MarketClock | null,
   timeZone: string | null,
-  now: number,
+  now: number | null,
 ): MarketText {
   const local = timeZone && timeZone !== EXCHANGE_TIME_ZONE ? timeZone : null;
   const title = local
@@ -58,7 +59,7 @@ export function describeMarket(
     if (ms === null) return null;
     const et = formattersFor(EXCHANGE_TIME_ZONE);
     const zone = formattersFor(local ?? EXCHANGE_TIME_ZONE);
-    const otherDay = alwaysWeekday || zone.day.format(ms) !== zone.day.format(now);
+    const otherDay = alwaysWeekday || now === null || zone.day.format(ms) !== zone.day.format(now);
     const shown = (otherDay ? zone.weekdayTime : zone.time).format(ms);
     if (!local) return `${shown} ET`;
     const etOtherDay = et.day.format(ms) !== zone.day.format(ms);
@@ -107,11 +108,14 @@ export interface ConnectionText {
   message: string | null;
 }
 
-/** Combines the browser↔server link with the server↔provider status into one indicator. */
+/**
+ * Combines the browser↔server link with the server↔provider status into one indicator. The
+ * retry countdown is left out while `now` is null (server render and hydration).
+ */
 export function describeConnection(
   link: "connecting" | "open" | "lost",
   status: ConnectionStatus,
-  now: number,
+  now: number | null,
 ): ConnectionText {
   if (link === "lost") {
     return {
@@ -122,7 +126,7 @@ export function describeConnection(
     };
   }
   const retry =
-    status.retryAt === null
+    status.retryAt === null || now === null
       ? ""
       : ` Retrying in ${Math.max(1, Math.round((status.retryAt - now) / 1000))} s.`;
   switch (status.state) {

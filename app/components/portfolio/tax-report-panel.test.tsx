@@ -152,6 +152,21 @@ describe("TaxReportPanel edge cases", () => {
     expect(screen.getByRole("row", { name: /2024/ })).not.toHaveTextContent("…");
   });
 
+  it("warns that dividends may be incomplete when some loaded and some failed", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    render(
+      <TaxReportPanel
+        trades={TRADES}
+        received={RECEIVED}
+        receivedError="Couldn't load dividends for KO."
+        display={display("USD", 1)}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Dividends may be incomplete: Couldn't load dividends for KO.",
+    );
+  });
+
   it("asks for rates from 1999 when a trade is older, and still converts it", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       expect(String(input)).toBe("/api/fx/history?quote=SEK&from=1999-01-01");

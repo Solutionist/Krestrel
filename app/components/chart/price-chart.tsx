@@ -113,6 +113,13 @@ const LOAD_OLDER_WITHIN_BARS = 20;
 const INDICATOR_STORAGE_KEY = "krestrel.indicators";
 const OVERLAY_STORAGE_KEY = "krestrel.overlays";
 const CLAUDE_CONSENT_KEY = "krestrel.claudeConsent";
+/** Whether the owner agreed to send chart data to Claude; works even when storage is blocked. */
+const claudeConsent = createStoredValue<boolean>(
+  CLAUDE_CONSENT_KEY,
+  false,
+  (raw) => (raw === "yes" ? true : null),
+  (value) => (value ? "yes" : "no"),
+);
 /** OutlookRequestSchema's minimum: fewer candles can't carry levels or a trend. */
 const MIN_OUTLOOK_CANDLES = 20;
 
@@ -157,9 +164,10 @@ interface ChartParts {
 
 /**
  * Candlestick + volume chart (TradingView Lightweight Charts, ADR 0010) with indicators, hindsight
- * overlays, and the insights section. The chart is created once; switching symbol/interval reloads
- * data with `setData`; live ticks/bars update the last candle once per animation frame; older
- * history is fetched as the view approaches the first loaded candle.
+ * overlays, and the insights section. Created per symbol (the dashboard keys it on symbol and
+ * theme); interval changes and history reloads use `setData`. Live ticks/bars update the last
+ * candle once per animation frame; older history is fetched as the view approaches the first
+ * loaded candle.
  */
 export function PriceChart({
   symbol,
@@ -888,6 +896,7 @@ export function PriceChart({
     let pending: Candle | null = null;
     let frame = 0;
     let ready = false;
+    let failed = false;
     let loadingOlder = false;
     let olderExhausted = false;
     const queued: Parameters<LiveListener>[0][] = [];
@@ -932,7 +941,11 @@ export function PriceChart({
       frame ||= requestAnimationFrame(flush);
     };
     // Live events that arrive while history is loading are replayed once it lands.
-    const unsubscribe = onLive((event) => (ready ? fold(event) : queued.push(event)));
+    const unsubscribe = onLive((event) => {
+      if (event.data.symbol !== symbol || failed) return;
+      if (ready) fold(event);
+      else queued.push(event);
+    });
 
     const fetchCandles = async (query: string) => {
       const response = await fetch(
@@ -1018,6 +1031,9 @@ export function PriceChart({
       })
       .catch((error: unknown) => {
         if (abort.signal.aborted) return;
+        failed = true;
+        queued.length = 0;
+        setAnalysis(null);
         setLoad({
           kind: "error",
           message: error instanceof Error ? error.message : "Chart failed to load.",
@@ -1058,13 +1074,14 @@ export function PriceChart({
 
   // ── AI outlook by the chosen AI (ADR 0016, 0020) ─────────────────────────────────────────────
   async function getOutlook() {
+    if (load.kind !== "ready") return;
     // Only Claude sends the chart off this computer; local models need no consent.
-    if (outlookAi.provider === "claude" && localStorage.getItem(CLAUDE_CONSENT_KEY) !== "yes") {
+    if (outlookAi.provider === "claude" && !claudeConsent.get()) {
       const ok = window.confirm(
         `AI outlook sends the ticker (${symbol}), this chart's ${timeframe} prices and recent headlines (no keys or account data) to Anthropic through your own Claude Code CLI and Claude subscription. Claude also searches the web for news and analyst ratings. Continue?`,
       );
       if (!ok) return;
-      localStorage.setItem(CLAUDE_CONSENT_KEY, "yes");
+      claudeConsent.set(true);
     }
     // The candles Insights analyses, so the AI's levels and the local plan agree.
     const candles = analysisWindow(dataRef.current, timeframe);
@@ -1244,7 +1261,7 @@ export function PriceChart({
             timeframe={timeframe}
             outlook={outlook}
             lastPrice={analysis?.plan?.lastPrice ?? null}
-            canAsk={analysis !== null}
+            canAsk={analysis !== null && load.kind === "ready"}
             planShown={overlays.has("plan")}
             onAsk={() => void getOutlook()}
             onTogglePlan={() => toggleOverlay("plan")}

@@ -109,9 +109,10 @@ export function TaxReportPanel({
         </p>
       )}
 
-      {dividendsFailed && (
+      {receivedError !== null && (
         <p role="alert" className="text-xs text-muted">
-          Dividends left out: {receivedError}
+          {dividendsFailed ? "Dividends left out: " : "Dividends may be incomplete: "}
+          {receivedError}
         </p>
       )}
 

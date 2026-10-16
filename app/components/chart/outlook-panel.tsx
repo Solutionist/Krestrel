@@ -126,10 +126,16 @@ export function OutlookPanel({
         </IconButton>
       </header>
 
-      <div
-        aria-live="polite"
-        className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pt-1 pb-4 text-sm"
-      >
+      <p role="status" className="sr-only">
+        {outlook.kind === "loading"
+          ? "Working…"
+          : outlook.kind === "error"
+            ? outlook.message
+            : outlook.kind === "done"
+              ? "Outlook ready"
+              : ""}
+      </p>
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pt-1 pb-4 text-sm">
         {outlook.kind === "idle" && (
           <div className="space-y-3 pt-1">
             <p className="text-pretty text-text">
