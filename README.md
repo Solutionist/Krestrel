@@ -12,6 +12,7 @@ Live prices, candlestick charts, portfolios and opt-in AI insight, all running o
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![CI](https://github.com/Solutionist/Krestrel/actions/workflows/ci.yml/badge.svg)](https://github.com/Solutionist/Krestrel/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/Solutionist/Krestrel/actions/workflows/codeql.yml/badge.svg)](https://github.com/Solutionist/Krestrel/actions/workflows/codeql.yml)
+[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/Solutionist/Krestrel?utm_source=oss&utm_medium=github&utm_campaign=Solutionist%2FKrestrel&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
 ![Node 24](https://img.shields.io/badge/node-24_LTS-339933?logo=node.js&logoColor=white)
 ![React Router 8](https://img.shields.io/badge/React_Router-8-CA4245?logo=reactrouter&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
