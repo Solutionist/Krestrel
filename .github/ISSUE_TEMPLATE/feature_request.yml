@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an improvement to Krestrel.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Krestrel is personal, single-user and loopback-only. Order placement, accounts or auth, multi-user and public hosting are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

@@ -2,35 +2,52 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="public/brand/krestrel-logo-on-dark.svg">
-  <img src="public/brand/krestrel-logo-on-light.svg" alt="Krestrel — local trading platform" width="420">
+  <img src="public/brand/krestrel-logo-on-light.svg" alt="Krestrel — self-hosted market ticker" width="420">
 </picture>
 
 **A self-hosted, real-time ticker for NYSE & Nasdaq.**<br>
-Live prices, candlestick charts, portfolios and AI insight, all running on your own machine.
+Live prices, candlestick charts, portfolios and opt-in AI insight, all running on your own machine.
 
 ![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-2563eb)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 ![Node 24](https://img.shields.io/badge/node-24_LTS-339933?logo=node.js&logoColor=white)
 ![React Router 8](https://img.shields.io/badge/React_Router-8-CA4245?logo=reactrouter&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)
 ![Local only](https://img.shields.io/badge/binds_to-127.0.0.1-10b981)
 
+[Features](#features) · [Screenshots](#screenshots) · [Quick start](#quick-start) · [Architecture](#architecture) · [Configuration](#configuration) · [License](#license)
+
 </div>
 
+![Krestrel dashboard: watchlist, NVDA daily candles with EMA, Bollinger Bands and RSI](docs/images/dashboard.png)
+
+<div align="center"><sub>Simulated data from the built-in mock provider.</sub></div>
+
 > [!IMPORTANT]
-> **Personal use only.** Alpaca market data is licensed for personal, non-professional use. Krestrel binds to `127.0.0.1` and is not meant to be hosted publicly or shared. It never places orders.
+> The code is MIT-licensed. Market data you stream with your own Alpaca keys is for personal, non-professional use under Alpaca's terms, so Krestrel binds to 127.0.0.1, has no accounts, sharing or hosting features, and never places orders.
 
 ---
 
 ## Contents
 
 - [Features](#features)
+- [Screenshots](#screenshots)
 - [Quick start](#quick-start)
 - [Optional extras](#optional-extras)
+- [Architecture](#architecture)
+- [Tech stack](#tech-stack)
 - [Configuration](#configuration)
 - [Commands](#commands)
+- [Testing](#testing)
+- [Project structure](#project-structure)
+- [Security & privacy](#security--privacy)
 - [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
 - [Project docs](#project-docs)
+- [Acknowledgements](#acknowledgements)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ## Features
 
@@ -78,11 +95,27 @@ Each AI feature runs on **your own** Claude Code subscription or on a free local
 > [!NOTE]
 > On Alpaca's free plan, live data comes from the IEX exchange only (partial volume), and the UI says so. Complete-market history is available once it is at least 15 minutes old.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/portfolio.png" alt="Demo portfolio: value, P/L with up and down arrows, expected dividends and holdings table"></td>
+    <td width="50%"><img src="docs/images/dividends.png" alt="Dividends tab: dividends received this year, last year and all time, with a per-payment table"></td>
+  </tr>
+  <tr>
+    <td align="center">Holdings with live P/L and next dividends</td>
+    <td align="center">Dividends received, worked out from your trades</td>
+  </tr>
+</table>
+
+<sub>All screenshots show simulated data from `MARKET_PROVIDER=mock`.</sub>
+
 ## Quick start
 
-**Requirements:** Node.js 24 LTS (`.nvmrc`) · [Bun](https://bun.sh) 1.4 (package manager only) · Docker (for PostgreSQL 18) · a free [Alpaca](https://alpaca.markets) account (paper-trading keys work), or the mock provider.
+**Requirements:** Node.js 24 LTS (`.nvmrc`) · [Bun](https://bun.sh) 1.4+ (installs packages and runs scripts) · Docker (PostgreSQL 18) · a free [Alpaca](https://alpaca.markets) account (paper keys work), or the mock provider.
 
 ```bash
+git clone https://github.com/Solutionist/Krestrel.git && cd Krestrel
 bun install
 cp .env.example .env          # fill in ALPACA_KEY_ID and ALPACA_SECRET_KEY
 bun run db:up                 # Postgres on 127.0.0.1:5432
@@ -116,31 +149,66 @@ Every AI feature (AI outlook, stock ideas, screenshot import, holding groups) ca
 | Local models | [Ollama](https://ollama.com) | Keep Ollama running, then click Download in the AI menu. Large `qwen3.8:27b` needs a 24 GB GPU; Medium `qwen3-vl:8b-instruct` and Small `qwen3-vl:4b-instruct` run on far less |
 | Web search for local models | A [Tavily](https://tavily.com) API key | Set `TAVILY_API_KEY` in `.env`. Only search queries are sent |
 
-**Privacy with Claude:** every prompt is scrubbed of emails, phone numbers, card and account numbers before it leaves, and Claude Code runs without your personal `CLAUDE.md` files. A screenshot sent to Claude is first masked on your computer: only holdings rows and column headers stay visible, and lines carrying a personal-field label (phone, ID, SSN, date of birth…, in any case) are blacked out with everything else. You approve the masked copy before it goes, and it always goes to the Claude model it was prepared for. Local models skip all of this because nothing leaves your machine.
+## Architecture
+
+```mermaid
+flowchart LR
+  UI["Browser<br/>React UI"] <-->|"SSE + JSON"| RR["React Router 8 server<br/>127.0.0.1 only"]
+  RR --> HUB["MarketHub<br/>one upstream connection"]
+  HUB <-->|"WebSocket + REST"| PROV[("Alpaca<br/>or mock provider")]
+  HUB --> PG[("PostgreSQL 18")]
+  RR --> PG
+  RR -->|"currency codes + dates"| FX[("ECB rates<br/>via Frankfurter")]
+  RR -.->|"opt-in, personal data scrubbed"| CL["Claude Code CLI"]
+  RR -.->|"opt-in, local"| OL["Ollama"]
+```
+
+- **One upstream connection.** A single `MarketHub` owns the provider's stream; every browser tab shares it, because the free Alpaca plan allows only one ([ADR 0004](ai/decisions/0004-single-upstream-connection.md)).
+- **SSE fan-out.** The server pushes ticks, bars and alerts to tabs over Server-Sent Events; writes go through JSON resource routes ([ADR 0002](ai/decisions/0002-sse-over-websockets.md)).
+- **Bars stored per source**, so IEX live bars and full-market history never mix; missing intraday and daily history is backfilled automatically ([ADR 0005](ai/decisions/0005-bars-by-source.md), [ADR 0011](ai/decisions/0011-daily-history-for-long-intervals.md)).
+- **Migrations at boot.** The server applies Drizzle migrations before it serves anything.
+- **Loopback only**, with a request guard on every request ([ADR 0007](ai/decisions/0007-loopback-only.md); see [Security & privacy](#security--privacy)).
+
+More detail: [`ai/architecture.md`](ai/architecture.md) and the decision records in [`ai/decisions/`](ai/decisions/).
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| UI | React 19, React Router 8 (SSR), Tailwind CSS 4, Lightweight Charts 5, Phosphor Icons, Geist |
+| Server | Node 24, Server-Sent Events, Zod 4, pino |
+| Data | PostgreSQL 18, Drizzle ORM, postgres.js |
+| AI (opt-in) | Claude Code CLI, Ollama, Tavily |
+| Tooling | TypeScript 7 strict, Vite 8, Vitest 5 + Testing Library, Biome 2, Bun |
 
 ## Configuration
 
-Settings live in `.env`. Invalid or missing values stop the server at startup with a message naming each variable.
+Settings live in `.env` (copy [`.env.example`](.env.example)). Invalid or missing values stop the server at startup with a message naming each variable.
 
 <details>
 <summary><b>All variables</b></summary>
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | `postgres://krestrel:krestrel@127.0.0.1:5432/krestrel` | Postgres for host runs (compose overrides it) |
+| `DATABASE_URL` | — (required; `.env.example` has the local one) | Postgres for host runs (compose overrides it) |
 | `MARKET_PROVIDER` | `alpaca` | `alpaca` or `mock` |
-| `BACKFILL_DAYS` | `30` | Days of 1-minute history per symbol (intraday intervals) |
-| `DAILY_HISTORY_YEARS` | `10` | Years of daily history per symbol (1D–1Y intervals) |
-| `LOG_LEVEL` | `info` | `trace` … `fatal` |
+| `BACKFILL_DAYS` | `30` | Days of 1-minute history per symbol (intraday intervals), 0–365 |
+| `DAILY_HISTORY_YEARS` | `10` | Years of daily history per symbol (1D–1Y intervals), 0–30 |
+| `LOG_LEVEL` | `info` | `trace` … `fatal`, `silent` |
 | `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY` | — | Required for `alpaca` |
 | `ALPACA_STREAM_FEED` | `iex` | `iex` (free) or `sip` (paid) |
 | `ALPACA_TRADING_URL` | `https://paper-api.alpaca.markets` | Clock and asset lookup. Use `https://api.alpaca.markets` with live-account keys. A trailing `/v2` is fine |
+| `ALPACA_DATA_URL`, `ALPACA_STREAM_URL` | `https://data.alpaca.markets`, `wss://stream.data.alpaca.markets/v2` | Endpoint overrides, rarely needed. The stream URL must be `wss://` |
 | `LLM_PROVIDER` | `claude-cli` | `claude-cli` or `none` |
-| `CLAUDE_CLI_PATH`, `CLAUDE_MODEL`, `CLAUDE_TIMEOUT_MS` | `claude`, CLI default, `180000` | CLI location, model for "Claude (default)", and default timeout |
+| `CLAUDE_CLI_PATH`, `CLAUDE_MODEL` | `claude`, CLI default | CLI location and the model for "Claude (default)" |
+| `CLAUDE_TIMEOUT_MS` | `180000` | 10000–600000. Wait for a Claude call without its own budget (holding groups). The outlook, stock ideas and screenshot import always allow 300000 (5 min) |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | `http://127.0.0.1:11434`, `qwen3-vl:8b-instruct` | Local Ollama and the model used for "Local default". Loopback URLs only |
 | `TAVILY_API_KEY` | — | Optional. Web search for local models (outlook, ideas) |
-| `MOCK_SEED`, `MOCK_TICK_MS` | `42`, `1000` | Mock provider seed and tick interval |
+| `TAVILY_URL` | `https://api.tavily.com` | Tavily endpoint (https only) |
+| `MOCK_SEED`, `MOCK_TICK_MS` | `42`, `1000` | Mock provider seed and tick interval (≥ 50) |
+| `HOST`, `PORT` | `127.0.0.1`, `3000` | `bun run start` sets 127.0.0.1 / 3000; the Docker image uses 0.0.0.0 inside the container |
 | `POSTGRES_*`, `APP_PORT` | see `.env.example` | Docker Compose settings |
+| `TEST_DATABASE_URL` | `DATABASE_URL` + `_test` | Database for the DB tests |
 
 </details>
 
@@ -149,11 +217,50 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 | Command | What it does |
 |---|---|
 | `bun run dev` | Dev server on 127.0.0.1:5173 |
-| `bun run build` · `bun run start` | Production build · serve |
+| `bun run build` | Production build |
+| `bun run start` | Serve the build on http://127.0.0.1:3000 |
 | `bun run typecheck` · `lint` · `format` | Types · Biome lint · Biome format |
 | `bun run test` | Unit, component and DB tests (needs `db:up`). Use this, not `bun test` |
 | `bun run db:up` · `db:down` | Start · stop Postgres |
 | `bun run db:generate` · `db:migrate` · `db:studio` | Drizzle migrations and studio |
+
+## Testing
+
+`bun run test` runs three Vitest projects (never bare `bun test`, which is Bun's own runner):
+
+| Project | Environment | Files |
+|---|---|---|
+| `unit` | Node | `app/**/*.test.ts` |
+| `dom` | jsdom + Testing Library | `app/**/*.test.tsx` |
+| `db` | Real PostgreSQL | Database queries, market hub, alerts, backfill and daily closes |
+
+DB tests create and use a separate `<db>_test` database (`TEST_DATABASE_URL`), so start Postgres first with `bun run db:up`. Recorded provider responses live in `tests/fixtures`. Unit tests sit next to the code they cover.
+
+## Project structure
+
+```text
+app/routes/        Pages and api.* resource routes (SSE, JSON)
+app/.server/       Server-only code: env, logger, database, market data, AI
+app/lib/           Isomorphic types, Zod schemas, formatters and calculations
+app/components/    React components (chart, watchlist, portfolio, UI)
+app/hooks/         React hooks (theme, stored settings, clock)
+drizzle/           SQL migrations, applied at boot
+tests/             Test setup and recorded fixtures
+ai/                Guidelines and architecture decision records
+public/brand/      Logo and icons
+docs/images/       README screenshots
+```
+
+## Security & privacy
+
+- **Loopback only.** Servers bind to `127.0.0.1`; Docker publishes ports on `127.0.0.1` only.
+- **Request guard.** A request whose `Host` isn't `127.0.0.1`, `localhost` or `[::1]` gets `421`, which blocks DNS rebinding. Any cross-site request to `/api/*`, whatever the method, gets `403`. Pages send `X-Frame-Options: DENY` and `frame-ancestors 'none'`.
+- **Secrets** stay in the git-ignored `.env` and are redacted from logs.
+- **Outbound data** is limited: exchange rates send only currency codes and a start date, and AI features are opt-in per feature.
+
+**Privacy with Claude:** every prompt is scrubbed of emails, phone numbers, card and account numbers before it leaves, and Claude Code runs without your personal `CLAUDE.md` files. A screenshot sent to Claude is first masked on your computer: only holdings rows and column headers stay visible, and lines carrying a personal-field label (phone, ID, SSN, date of birth…, in any case) are blacked out with everything else. You approve the masked copy before it goes, and it always goes to the Claude model it was prepared for. Local models skip all of this because nothing leaves your machine.
+
+Found a vulnerability? Report it privately via [GitHub security advisories](https://github.com/Solutionist/Krestrel/security/advisories/new), not in a public issue.
 
 ## Troubleshooting
 
@@ -171,7 +278,6 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 | Only USD in the currency menu | Exchange rates couldn't load; check the server log for `exchange rate refresh failed`, then restart `bun run dev` |
 | Code change to the market hub not picked up | Restart `bun run dev` (the hub survives hot reload on purpose) |
 | Random "connect ETIMEDOUT 127.0.0.1:5432" or "database does not exist" right after `createdb` | Docker Postgres networking hiccup on Windows; reload, or restart Docker Desktop if it keeps happening |
-| `bun run start` fails with `getaddrinfo ENOTFOUND ${HOST:-127.0.0.1}` (Windows) | Run `HOST=127.0.0.1 bunx react-router-serve ./build/server/index.js` instead |
 
 </details>
 
@@ -188,6 +294,28 @@ Settings live in `.env`. Invalid or missing values stop the server at startup wi
 
 </details>
 
+## Contributing
+
+Issues and pull requests are welcome. Use the bug or feature issue forms and fill in the pull request checklist. Before opening a PR, run `bun run typecheck && bun run lint && bun run test`, and read [`CLAUDE.md`](CLAUDE.md) and [`ai/`](ai/README.md) for conventions. Krestrel stays personal, single-user and loopback-only: trading, accounts or auth, multi-user and public hosting are out of scope.
+
 ## Project docs
 
 [`CLAUDE.md`](CLAUDE.md) is the entry point for contributors and AI agents. Detailed guidelines and decision records live in [`ai/`](ai/README.md). Brand assets are in [`public/brand/`](public/brand). Release notes are in [`CHANGELOG.md`](CHANGELOG.md) (current release: **1.0.0**).
+
+## Acknowledgements
+
+- [TradingView Lightweight Charts™](https://www.tradingview.com/) (Apache-2.0); its attribution logo shows on the charts.
+- [Alpaca](https://alpaca.markets) market data.
+- ECB reference rates via [Frankfurter](https://frankfurter.dev).
+- [Geist](https://vercel.com/font) (SIL OFL 1.1).
+- [Phosphor Icons](https://phosphoricons.com) (MIT).
+- [Tesseract.js](https://tesseract.projectnaptha.com) (Apache-2.0) for on-device OCR.
+- [React Router](https://reactrouter.com), [Drizzle ORM](https://orm.drizzle.team), [Zod](https://zod.dev) and [pino](https://getpino.io).
+
+## Disclaimer
+
+Not financial advice. Not affiliated with Alpaca, TradingView, Anthropic or the ECB. Free-plan live data is IEX-only and may be incomplete.
+
+## License
+
+MIT © 2026 Solutionist. See [LICENSE](LICENSE).

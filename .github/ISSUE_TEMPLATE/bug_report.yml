@@ -1,0 +1,58 @@
+name: Bug report
+description: Something in Krestrel doesn't work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste API keys, `.env` contents, account numbers or real holdings.
+        If you can, reproduce the bug with `MARKET_PROVIDER=mock`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start with `bun run dev`
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Market data provider
+      options:
+        - alpaca
+        - mock
+    validations:
+      required: true
+  - type: dropdown
+    id: run-mode
+    attributes:
+      label: How do you run it?
+      options:
+        - bun run dev
+        - bun run build + bun run start
+        - Docker Compose
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: OS, Node and Bun versions
+      placeholder: Windows 11, Node 24.x, Bun 1.4.x
+  - type: textarea
+    id: logs
+    attributes:
+      label: Server log excerpt
+      description: Check it for secrets and personal data before pasting.
+      render: text
+    validations:
+      required: false
