@@ -41,3 +41,7 @@ Run one project: `bun run vitest run --project unit`. Watch: `bun run vitest`.
 ## Provider tests
 
 Providers take injectable deps (`openSocket`/`fetch`/`now`/`random`/`sleep` for Alpaca; `now`/`random`/`tickIntervalMs` for mock) and a silent pino logger. Hub tests use a fake `MarketDataProvider` object — the contract boundary — against the real test DB.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request: `bun install --frozen-lockfile`, `bun run typecheck`, `bun run lint`, `bun run test` (all three projects, against a `postgres:18-alpine` service) and `bun run build`, with `MARKET_PROVIDER=mock`. Node comes from `.nvmrc` and Bun from `packageManager`, so bump those and CI follows. `codeql.yml` runs CodeQL `security-and-quality` on pushes, pull requests and weekly; `.coderabbit.yaml` configures CodeRabbit pull request reviews.

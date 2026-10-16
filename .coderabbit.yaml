@@ -1,0 +1,26 @@
+# CodeRabbit AI review settings: https://docs.coderabbit.ai/reference/configuration
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!bun.lock"
+    - "!drizzle/meta/**"
+    - "!docs/images/**"
+  path_instructions:
+    - path: "app/**"
+      instructions: >-
+        Follow CLAUDE.md: no `any`, no unexplained non-null `!`, Zod for every external input,
+        DB access only via app/.server/market/db/queries/, nothing from app/.server/ in client code,
+        servers bind loopback only, never colour alone for up/down (pair with ▲/▼).
+    - path: "app/routes/api.*.ts"
+      instructions: >-
+        State-changing actions must refuse cross-site requests (crossSiteRejection) and validate the
+        body with Zod. Never echo secrets or raw driver errors in responses.
+chat:
+  auto_reply: true

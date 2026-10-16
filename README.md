@@ -10,6 +10,8 @@ Live prices, candlestick charts, portfolios and opt-in AI insight, all running o
 
 ![Version 1.0.0](https://img.shields.io/badge/version-1.0.0-2563eb)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![CI](https://github.com/Solutionist/Krestrel/actions/workflows/ci.yml/badge.svg)](https://github.com/Solutionist/Krestrel/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/Solutionist/Krestrel/actions/workflows/codeql.yml/badge.svg)](https://github.com/Solutionist/Krestrel/actions/workflows/codeql.yml)
 ![Node 24](https://img.shields.io/badge/node-24_LTS-339933?logo=node.js&logoColor=white)
 ![React Router 8](https://img.shields.io/badge/React_Router-8-CA4245?logo=reactrouter&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
@@ -296,7 +298,7 @@ Found a vulnerability? Report it privately via [GitHub security advisories](http
 
 ## Contributing
 
-Issues and pull requests are welcome. Use the bug or feature issue forms and fill in the pull request checklist. Before opening a PR, run `bun run typecheck && bun run lint && bun run test`, and read [`CLAUDE.md`](CLAUDE.md) and [`ai/`](ai/README.md) for conventions. Krestrel stays personal, single-user and loopback-only: trading, accounts or auth, multi-user and public hosting are out of scope.
+Issues and pull requests are welcome. Use the bug or feature issue forms and fill in the pull request checklist. Before opening a PR, run `bun run typecheck && bun run lint && bun run test` (CI runs the same checks plus a build, and CodeQL and CodeRabbit review every pull request), and read [`CLAUDE.md`](CLAUDE.md) and [`ai/`](ai/README.md) for conventions. Krestrel stays personal, single-user and loopback-only: trading, accounts or auth, multi-user and public hosting are out of scope.
 
 ## Project docs
 

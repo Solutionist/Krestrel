@@ -56,6 +56,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Issue and pull request templates.
 - Dependabot for Bun packages, the Dockerfile and Docker Compose.
 - README screenshots from the mock provider.
+- CI (typecheck, lint, tests against Postgres, build) and CodeQL scanning on GitHub Actions; CodeRabbit review settings; Dependabot for GitHub Actions.
 
 ## [1.0.0] - 2026-10-15
 
