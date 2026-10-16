@@ -51,12 +51,17 @@ export function shiftDay(day: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+/** The ECB's first reference-rate day; no currency has a rate before it. */
+const ECB_FIRST_DAY = "1999-01-04";
+
 /**
  * A lookup of the rate in force on a day: the latest rate published on or before it, so weekends,
  * holidays and today before the ECB publishes use the previous business day's rate. null for a day
  * whose latest rate is more than `MAX_RATE_AGE_DAYS` older (a gap in publication), never a stale
- * rate. A day before the first known rate uses the first one (rates start in 1999). The lookup
- * itself is null when there are no rates at all.
+ * rate. A day before the first known rate uses the first one only when the series starts on the
+ * ECB's first day (1999-01-04); a series that starts later (a currency published later, or a
+ * fetched window) gives null rather than a rate from years after. The lookup itself is null when
+ * there are no rates at all.
  */
 export function rateOnDay(history: FxHistory): ((day: string) => number | null) | null {
   const days = Object.keys(history).sort();
@@ -77,7 +82,7 @@ export function rateOnDay(history: FxHistory): ((day: string) => number | null) 
         high = middle - 1;
       }
     }
-    if (found < 0) return first;
+    if (found < 0) return (days[0] ?? "") <= ECB_FIRST_DAY ? first : null;
     if ((days[found] ?? "") < shiftDay(day, -MAX_RATE_AGE_DAYS)) return null;
     return rates[found] ?? null;
   };

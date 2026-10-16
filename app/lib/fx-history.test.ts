@@ -16,8 +16,12 @@ describe("rateOnDay", () => {
     expect(rateOn?.("2024-03-09")).toBe(36.3);
   });
 
-  it("uses the first rate for a day before any publication", () => {
-    expect(rateOn?.("2024-02-28")).toBe(35.9);
+  it("has no rate for a day before a series that starts after 1999", () => {
+    expect(rateOn?.("2024-02-28")).toBeNull();
+  });
+
+  it("uses the first rate for a day before a series that starts on the ECB's first day", () => {
+    expect(rateOnDay({ "1999-01-04": 1.91, "1999-01-05": 1.9 })?.("1998-06-01")).toBe(1.91);
   });
 
   it("is null without rates", () => {

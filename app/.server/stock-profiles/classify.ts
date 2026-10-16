@@ -9,9 +9,6 @@ import type { StockProfile } from "~/lib/stock-profile";
 
 import type { LlmClient } from "../llm/types";
 
-/** A text-only batch is quick once the model is loaded; loading it can take a minute or two. */
-const TIMEOUT_MS = 180_000;
-
 const ClassificationSchema = z.object({
   profiles: z
     .array(
@@ -57,13 +54,14 @@ function buildClassifyPrompt(stocks: readonly StockToClassify[]): string {
 export async function classifyStocks(
   llm: LlmClient,
   stocks: readonly StockToClassify[],
+  signal?: AbortSignal,
 ): Promise<Array<Omit<StockProfile, "source">>> {
   if (stocks.length === 0) return [];
   const { data: answer } = await llm.generateStructured({
     system: SYSTEM,
     prompt: buildClassifyPrompt(stocks),
     schema: ClassificationSchema,
-    timeoutMs: TIMEOUT_MS,
+    signal,
   });
   const asked = new Set(stocks.map((stock) => stock.symbol));
   const bySymbol = new Map<string, Omit<StockProfile, "source">>();

@@ -34,43 +34,70 @@ function ibanValid(raw: string): boolean {
 }
 
 /**
- * Each kind's pattern plus an optional check on the match. Order matters: earlier kinds are
+ * Where a valid card number sits in a card-pattern match: the widest run of whole digit groups
+ * (by characters, earliest on a tie) with 13–19 digits that passes Luhn and is either grouped or
+ * 15/16 contiguous digits (epoch ms is 13, volumes far less). Finds "4111111111111111" in
+ * "4111111111111111 123", where the whole match fails the checksum.
+ */
+function cardSpan(match: string): readonly [number, number] | null {
+  const groups = [...match.matchAll(/\d+/g)].map((group) => ({
+    start: group.index,
+    end: group.index + group[0].length,
+    digits: group[0],
+  }));
+  let best: readonly [number, number] | null = null;
+  for (let first = 0; first < groups.length; first++) {
+    let digits = "";
+    for (let last = first; last < groups.length; last++) {
+      digits += groups[last]?.digits ?? "";
+      if (digits.length > 19) break;
+      if (digits.length < 13 || !luhnValid(digits)) continue;
+      if (last === first && digits.length !== 15 && digits.length !== 16) continue;
+      const start = groups[first]?.start ?? 0;
+      const end = groups[last]?.end ?? 0;
+      if (!best || end - start > best[1] - best[0]) best = [start, end];
+    }
+  }
+  return best;
+}
+
+/**
+ * Each kind's pattern plus an optional `locate`, which returns the part of the match to replace
+ * (null keeps it all; without `locate` the whole match goes). Order matters: earlier kinds are
  * replaced first, so a card number isn't half-eaten by the phone pattern. Number patterns refuse
  * to start or end inside a longer number ("12.4111…", "…1111.5"), but a sentence's full stop or
  * comma after a number is fine.
  */
-const RULES: ReadonlyArray<{ kind: PiiKind; pattern: RegExp; valid?: (match: string) => boolean }> =
-  [
-    { kind: "email", pattern: /[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}/gi },
-    {
-      kind: "iban",
-      pattern: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b/g,
-      valid: ibanValid,
-    },
-    {
-      // 13–19 digits; contiguous runs only count at 15–16 digits (epoch ms is 13, volumes far less).
-      kind: "card",
-      pattern: /(?<!\d|\d[.,])\d(?:[ -]?\d){12,18}(?!\d|[.,]\d)/g,
-      valid: (match) => {
-        const digits = match.replace(/\D/g, "");
-        const grouped = /[ -]/.test(match);
-        return luhnValid(digits) && (grouped || digits.length === 15 || digits.length === 16);
-      },
-    },
-    { kind: "ssn", pattern: /(?<!\d|\d[.,-])\d{3}-\d{2}-\d{4}(?![\d-]|[.,]\d)/g },
-    {
-      // Needs two separators: "212-555-0123", "(02) 123 4567", "+66 81 234 5678", "081.234.5678".
-      kind: "phone",
-      pattern:
-        /(?<!\w|\d[.,])(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)[ .-]?|\d{2,4}[ .-])\d{3,4}[ .-]\d{4}(?!\w|[.,]\d)/g,
-    },
-    {
-      // Only when labelled, e.g. "Account: 1234-5678", "Acct # ****1234", "A/C no. 98765".
-      kind: "account",
-      pattern:
-        /\b(?:account|acct|a\/c)(?:[ \t]*(?:no\.?|number|#|id))?[ \t]*[:#]?[ \t]*(?=[A-Z0-9*•x-]*\d)[A-Z0-9*•x-]{4,}/gi,
-    },
-  ];
+const RULES: ReadonlyArray<{
+  kind: PiiKind;
+  pattern: RegExp;
+  locate?: (match: string) => readonly [number, number] | null;
+}> = [
+  { kind: "email", pattern: /[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}/gi },
+  {
+    kind: "iban",
+    pattern: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,3})?\b/g,
+    locate: (match) => (ibanValid(match) ? [0, match.length] : null),
+  },
+  {
+    kind: "card",
+    pattern: /(?<!\d|\d[.,])\d(?:[ -]?\d){12,18}(?!\d|[.,]\d)/g,
+    locate: cardSpan,
+  },
+  { kind: "ssn", pattern: /(?<!\d|\d[.,-])\d{3}-\d{2}-\d{4}(?![\d-]|[.,]\d)/g },
+  {
+    // Needs two separators: "212-555-0123", "(02) 123 4567", "+66 81 234 5678", "081.234.5678".
+    kind: "phone",
+    pattern:
+      /(?<!\w|\d[.,])(?:\+\d{1,3}[ .-]?)?(?:\(\d{2,4}\)[ .-]?|\d{2,4}[ .-])\d{3,4}[ .-]\d{4}(?!\w|[.,]\d)/g,
+  },
+  {
+    // Only when labelled, e.g. "Account: 1234-5678", "Acct # ****1234", "A/C no. 98765".
+    kind: "account",
+    pattern:
+      /\b(?:account|acct|a\/c)(?:[ \t]*(?:no\.?|number|#|id))?[ \t]*[:#]?[ \t]*(?=[A-Z0-9*•x-]*\d)[A-Z0-9*•x-]{4,}/gi,
+  },
+];
 
 export interface Redaction {
   text: string;
@@ -82,11 +109,12 @@ export interface Redaction {
 export function redactPii(text: string): Redaction {
   const found: Partial<Record<PiiKind, number>> = {};
   let result = text;
-  for (const { kind, pattern, valid } of RULES) {
+  for (const { kind, pattern, locate } of RULES) {
     result = result.replace(pattern, (match) => {
-      if (valid && !valid(match)) return match;
+      const span = locate ? locate(match) : [0, match.length];
+      if (!span) return match;
       found[kind] = (found[kind] ?? 0) + 1;
-      return `[redacted ${kind}]`;
+      return `${match.slice(0, span[0])}[redacted ${kind}]${match.slice(span[1])}`;
     });
   }
   return { text: result, found };

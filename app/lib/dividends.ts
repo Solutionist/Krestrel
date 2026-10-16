@@ -4,6 +4,8 @@
 
 import * as z from "zod";
 
+import { SHARE_EPSILON } from "./portfolio";
+
 /** One cash dividend as the provider reports it. Dates are `YYYY-MM-DD`. */
 export interface DividendPayment {
   /** Buy before this date to receive the payment. */
@@ -266,7 +268,8 @@ export function sharesHeldBefore(
     if (trade.symbol !== symbol || trade.tradedOn >= exDate) continue;
     shares += trade.side === "buy" ? trade.shares : -trade.shares;
   }
-  return Math.max(0, shares);
+  // Float residue from buys and sells that cancel out is not a holding.
+  return shares < SHARE_EPSILON ? 0 : shares;
 }
 
 export interface ExpectedPayment extends UpcomingDividend {

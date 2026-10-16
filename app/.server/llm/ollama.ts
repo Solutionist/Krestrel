@@ -13,7 +13,7 @@ const LOOPBACK_HOSTS: Record<string, true> = { "127.0.0.1": true, localhost: tru
 const OllamaConfigSchema = z.object({
   OLLAMA_URL: z
     .url({ protocol: /^https?$/ })
-    .refine((url) => LOOPBACK_HOSTS[new URL(url).hostname] === true, {
+    .refine((url) => URL.canParse(url) && LOOPBACK_HOSTS[new URL(url).hostname] === true, {
       error: "must point at this machine (127.0.0.1, localhost or [::1])",
     })
     .default("http://127.0.0.1:11434"),
@@ -85,7 +85,9 @@ export function createOllamaClient(context: OllamaContext, chosenModel: string |
             // tokens) or a research-filled prompt plus the answer; the reply then stops empty.
             options: { temperature: 0, num_ctx: 16_384 },
           }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: request.signal
+            ? AbortSignal.any([AbortSignal.timeout(timeoutMs), request.signal])
+            : AbortSignal.timeout(timeoutMs),
         });
       } catch (err) {
         if (err instanceof Error && err.name === "TimeoutError") {
@@ -94,6 +96,8 @@ export function createOllamaClient(context: OllamaContext, chosenModel: string |
             `${model} took longer than ${Math.round(timeoutMs / 60_000)} minutes. Try a smaller model, or a GPU machine.`,
           );
         }
+        if (request.signal?.aborted)
+          throw new LlmError("failed", "Stopped: the page that asked for this was closed.");
         log.warn({ err }, "ollama unreachable");
         throw new LlmError(
           "unavailable",

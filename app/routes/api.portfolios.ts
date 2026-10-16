@@ -66,14 +66,19 @@ export async function action({ request }: Route.ActionArgs) {
     case "updateTrade": {
       const { symbol, side, shares, price, fee, tradedOn } = input;
       const trade = { symbol, side, shares, price, fee, tradedOn };
-      const watch = await ensureWatched(trade.symbol);
-      if (!watch.ok) return fail(422, "unknown_symbol", watch.message);
+      const listed = await getMarketHub().verifyListed([symbol]);
+      if (listed.get(symbol) === null) {
+        return fail(422, "unknown_symbol", `${symbol} isn't an active NYSE or Nasdaq listing.`);
+      }
       const result: TradeWriteResult =
         input.intent === "addTrade"
           ? await addTrades(db, input.portfolioId, [trade])
           : await updateTrade(db, input.id, trade);
-      const warning = watch.unpriced
-        ? `Saved, but ${symbol} has no live price yet: ${watch.unpriced}`
+      // A refused write (oversell, missing portfolio) must not take a watchlist slot.
+      if (!result.ok) return tradeWriteResponse(result);
+      const unpriced = await ensureWatched(symbol);
+      const warning = unpriced
+        ? `Saved, but ${symbol} has no live price yet: ${unpriced}`
         : undefined;
       return tradeWriteResponse(result, warning);
     }
@@ -89,17 +94,17 @@ export async function action({ request }: Route.ActionArgs) {
           `${unknown.join(", ")} ${unknown.length === 1 ? "isn't an active NYSE or Nasdaq listing" : "aren't active NYSE or Nasdaq listings"}. Fix or remove ${unknown.length === 1 ? "that row" : "those rows"}.`,
         );
       }
+      const result = await addTrades(db, input.portfolioId, input.trades);
+      if (!result.ok) return tradeWriteResponse(result);
       const unpriced: string[] = [];
       let reason = "";
       for (const symbol of symbols) {
-        const watch = await ensureWatched(symbol);
-        if (!watch.ok) return fail(422, "unknown_symbol", watch.message);
-        if (watch.unpriced) {
+        const why = await ensureWatched(symbol);
+        if (why) {
           unpriced.push(symbol);
-          reason = watch.unpriced;
+          reason = why;
         }
       }
-      const result = await addTrades(db, input.portfolioId, input.trades);
       const warning =
         unpriced.length > 0
           ? `Saved, but ${unpriced.join(", ")} ${unpriced.length === 1 ? "has" : "have"} no live price yet: ${reason}`
@@ -115,20 +120,15 @@ export async function action({ request }: Route.ActionArgs) {
 
 /**
  * Holdings are priced from the live stream, which covers watchlist symbols only, so a traded
- * symbol joins the watchlist. Unknown tickers are refused; a full watchlist or an unreachable
- * provider still saves the trade, and `unpriced` says why the holding has no live price.
+ * symbol joins the watchlist once its trade is saved. Returns why the holding has no live price
+ * (full watchlist, unreachable provider, …), or undefined when the symbol is watched.
  */
-async function ensureWatched(
-  symbol: string,
-): Promise<{ ok: true; unpriced?: string } | { ok: false; message: string }> {
+async function ensureWatched(symbol: string): Promise<string | undefined> {
   const hub = getMarketHub();
-  if (hub.snapshot().watchlist.includes(symbol)) return { ok: true };
+  if (hub.snapshot().watchlist.includes(symbol)) return undefined;
   const added = await hub.addSymbol(symbol);
-  if (added.ok || added.code === "duplicate") return { ok: true };
-  if (added.code === "invalid" || added.code === "unknown") {
-    return { ok: false, message: added.message };
-  }
-  return { ok: true, unpriced: added.message };
+  if (added.ok || added.code === "duplicate") return undefined;
+  return added.message;
 }
 
 function respond(result: PortfolioActionResult): Response {

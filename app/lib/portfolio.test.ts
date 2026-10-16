@@ -7,6 +7,7 @@ import {
   portfolioTotals,
   sharesToReachAverage,
   type Trade,
+  TradeInputSchema,
   type TradeSide,
   valuePosition,
 } from "./portfolio";
@@ -144,6 +145,22 @@ describe("valuation", () => {
     expect(totals.unpriced).toEqual(["MSFT"]);
   });
 
+  it("measures the day change only against positions that have one", () => {
+    const base = { shares: 10, costBasis: 900, averageCost: 90, realized: 0 };
+    const aapl = valuePosition(
+      { symbol: "AAPL", ...base },
+      { symbol: "AAPL", lastPrice: 100, lastTs: null, previousClose: 99 },
+    );
+    const newco = valuePosition(
+      { symbol: "NEWCO", ...base },
+      { symbol: "NEWCO", lastPrice: 100, lastTs: null, previousClose: null },
+    );
+    const totals = portfolioTotals([aapl, newco]);
+    expect(totals.marketValue).toBe(2000);
+    expect(totals.dayChange).toBeCloseTo(10);
+    expect(totals.dayChangeFraction).toBeCloseTo(10 / 990);
+  });
+
   it("merges the same symbol across portfolios into one average", () => {
     const [merged] = mergePositions([
       [{ symbol: "AAPL", shares: 10, costBasis: 1000, averageCost: 100, realized: 5 }],
@@ -156,6 +173,36 @@ describe("valuation", () => {
       averageCost: 175,
       realized: 4,
     });
+  });
+});
+
+describe("TradeInputSchema", () => {
+  const valid = {
+    symbol: "AAPL",
+    side: "buy",
+    shares: "10",
+    price: "187.5",
+    tradedOn: "2025-01-02",
+  };
+  const errorOf = (input: Record<string, unknown>) =>
+    TradeInputSchema.safeParse({ ...valid, ...input }).error?.issues[0]?.message;
+
+  it("rounds shares to 6 decimals and prices to 4, the stored scale", () => {
+    const parsed = TradeInputSchema.parse({ ...valid, shares: "1.0000025", price: "187.123456" });
+    expect(String(parsed.shares)).toMatch(/^\d+(\.\d{1,6})?$/);
+    expect(parsed.price).toBe(187.1235);
+  });
+
+  it("refuses shares that round to 0", () => {
+    expect(errorOf({ shares: "0.0000004" })).toBe("Shares must be more than 0");
+  });
+
+  it("explains a value that isn't a number", () => {
+    expect(errorOf({ shares: "1,000" })).toBe("Enter shares as a number, like 10 or 2.5");
+  });
+
+  it("refuses a future trade date", () => {
+    expect(errorOf({ tradedOn: "2999-01-01" })).toBe("The trade date can't be in the future");
   });
 });
 

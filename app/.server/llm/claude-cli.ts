@@ -58,6 +58,8 @@ export interface SpawnResult {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  /** Set when the caller's signal stopped the run. */
+  aborted: boolean;
   /** Set when the executable could not be started at all (e.g. ENOENT). */
   spawnError: NodeJS.ErrnoException | null;
 }
@@ -65,17 +67,29 @@ export interface SpawnResult {
 export type RunProcess = (
   command: string,
   args: readonly string[],
-  options: { stdin: string; cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+  options: {
+    stdin: string;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    timeoutMs: number;
+    signal?: AbortSignal;
+  },
 ) => Promise<SpawnResult>;
 
+/** Wait after SIGINT before forcing the CLI to exit. */
+const KILL_GRACE_MS = 5_000;
+
 const runProcess: RunProcess = (command, args, options) => {
+  const empty = { code: null, stdout: "", stderr: "", timedOut: false };
+  if (options.signal?.aborted)
+    return Promise.resolve({ ...empty, aborted: true, spawnError: null });
   let resolved: ResolvedCommand = { command, args: [] };
   if (process.platform === "win32") {
     try {
       resolved = resolveWindowsCommand(command, options.env.PATH);
     } catch (error) {
       const spawnError = error as NodeJS.ErrnoException;
-      return Promise.resolve({ code: null, stdout: "", stderr: "", timedOut: false, spawnError });
+      return Promise.resolve({ ...empty, aborted: false, spawnError });
     }
   }
   const { promise, resolve } = Promise.withResolvers<SpawnResult>();
@@ -87,11 +101,19 @@ const runProcess: RunProcess = (command, args, options) => {
   let stdout = "";
   let stderr = "";
   let timedOut = false;
+  let aborted = false;
   let spawnError: NodeJS.ErrnoException | null = null;
-  // SIGINT lets Claude Code end its turn cleanly (SIGTERM leaves it unfinished, exit 143).
+  let killTimer: NodeJS.Timeout | undefined;
+  // SIGINT lets Claude Code end its turn cleanly (SIGTERM leaves it unfinished, exit 143);
+  // SIGKILL follows if it hasn't exited after the grace period.
+  const stop = () => {
+    if (options.signal?.aborted) aborted = true;
+    child.kill("SIGINT");
+    killTimer ??= setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+  };
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGINT");
+    stop();
   }, options.timeoutMs);
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
     stdout += chunk;
@@ -102,9 +124,12 @@ const runProcess: RunProcess = (command, args, options) => {
   child.on("error", (error: NodeJS.ErrnoException) => {
     spawnError = error;
   });
+  options.signal?.addEventListener("abort", stop, { once: true });
   child.on("close", (code) => {
     clearTimeout(timer);
-    resolve({ code, stdout, stderr, timedOut, spawnError });
+    clearTimeout(killTimer);
+    options.signal?.removeEventListener("abort", stop);
+    resolve({ code, stdout, stderr, timedOut, aborted, spawnError });
   });
   child.stdin.on("error", () => {
     // The process exited before reading stdin; the close handler reports why.
@@ -262,6 +287,7 @@ export function createClaudeCliClient(
           cwd: scratchDir,
           env,
           timeoutMs,
+          signal: request.signal,
         });
         log.info(
           {
@@ -281,6 +307,8 @@ export function createClaudeCliClient(
         }
         if (result.spawnError)
           throw new LlmError("failed", `Couldn't start Claude Code: ${result.spawnError.message}`);
+        if (result.aborted)
+          throw new LlmError("failed", "Stopped: the page that asked for this was closed.");
         if (result.timedOut) {
           throw new LlmError(
             "timeout",

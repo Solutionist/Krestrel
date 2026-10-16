@@ -85,6 +85,7 @@ export class MarketHub {
   #started: Promise<void> | null = null;
   #clockTimer: NodeJS.Timeout | undefined;
   #backfillTimer: NodeJS.Timeout | undefined;
+  #stopped = false;
   #assets: { index: AssetIndex; loadedAt: number } | null = null;
   #assetsLoading: Promise<AssetIndex> | null = null;
 
@@ -177,6 +178,7 @@ export class MarketHub {
 
   /** Shuts the hub down for good (process exit): upstream, backfill, bar writer, SSE streams. */
   async stop(): Promise<void> {
+    this.#stopped = true;
     clearTimeout(this.#clockTimer);
     clearInterval(this.#backfillTimer);
     await this.#provider.disconnect();
@@ -494,6 +496,8 @@ export class MarketHub {
     } catch (err) {
       this.#log.error({ err }, "market clock request failed");
     }
+    // A poll in flight during stop() must not re-arm the timer.
+    if (this.#stopped) return;
     this.#clockTimer = setTimeout(() => void this.#pollClock(), delay);
   }
 }

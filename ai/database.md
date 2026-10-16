@@ -23,7 +23,7 @@ Drizzle syntax notes (0.45.4):
 
 ## Daily history (ADR 0011)
 
-`bars_1d(symbol, source, day date, open, high, low, close, volume)`, PK `(symbol, source, day)`, split-adjusted, `day` = New York trading date (migration `0001_daily_bars`). Queries: `upsertDailyBars`, `latestDailyDay`, `getCalendarCandles` (daily rows + minute-built days after the newest daily row, rolled up by `aggregateDays` from `app/lib/candles.ts`), `dailyBounds` (first/last stored day per symbol) and `listDailyCloses` (closes for many symbols over `[from, to)`), the last two for portfolio performance (ADR 0024), which also stores daily history for held stocks that aren't on the watchlist. Intraday `getCandles` buckets 1m/5m/15m/30m/1h/4h with `date_bin`.
+`bars_1d(symbol, source, day date, open, high, low, close, volume)`, PK `(symbol, source, day)`, split-adjusted, `day` = New York trading date (migration `0001_daily_bars`). Queries: `upsertDailyBars`, `getCalendarCandles` (daily rows + minute-built days after the newest daily row, rolled up by `aggregateDays` from `app/lib/candles.ts`), `dailyBounds` (first/last stored day per symbol) and `listDailyCloses` (closes for many symbols over `[from, to)`), the last two for portfolio performance (ADR 0024), which also stores daily history for held stocks that aren't on the watchlist. Intraday `getCandles` buckets 1m/5m/15m/30m/1h/4h with `date_bin`.
 
 ## Numeric mapping (ADR 0008)
 
@@ -62,3 +62,5 @@ Prices `numeric({ precision: 14, scale: 4, mode: "number" })`, volume `bigint({ 
 ## Backfill and upsert rules
 
 SIP REST, `feed=sip`, `end = now − 16 min`, default lookback `BACKFILL_DAYS=30`, paginate `next_page_token`, respect 200 req/min. All writes are upserts, so repeats are safe.
+
+Daily history (`bars_1d`) fills the tail after the newest stored day and, once per process per symbol, the head back to `DAILY_HISTORY_YEARS` before the oldest stored day. A head download is held in memory and upserted only once complete, so a partial head never moves the oldest day. Shutdown stops a download after its current page.

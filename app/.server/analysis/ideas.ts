@@ -262,6 +262,7 @@ export function sanitizeIdeas(
 export async function generateIdeas(
   llm: LlmClient,
   input: IdeasInput,
+  signal?: AbortSignal,
 ): Promise<{ ideas: IdeasModelOutput; model: string | null }> {
   const result = await llm.generateStructured({
     system: SYSTEM_PROMPT,
@@ -269,6 +270,7 @@ export async function generateIdeas(
     schema: IdeasModelSchema,
     webSearch: input.research.mode === "web",
     timeoutMs: IDEAS_TIMEOUT_MS,
+    signal,
   });
   return {
     ideas: sanitizeIdeas(result.data, {

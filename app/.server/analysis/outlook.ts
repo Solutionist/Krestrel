@@ -297,6 +297,7 @@ export function sanitizeOutlook(
 export async function generateOutlook(
   llm: LlmClient,
   input: OutlookInput,
+  signal?: AbortSignal,
 ): Promise<{ outlook: Outlook; model: string | null }> {
   const lastPrice = input.plan?.lastPrice ?? input.candles.at(-1)?.close ?? 0;
   const result = await llm.generateStructured({
@@ -305,6 +306,7 @@ export async function generateOutlook(
     schema: OutlookSchema,
     webSearch: input.research.mode === "web",
     timeoutMs: OUTLOOK_TIMEOUT_MS,
+    signal,
   });
   const isCitable = citationCheck(
     input.research,

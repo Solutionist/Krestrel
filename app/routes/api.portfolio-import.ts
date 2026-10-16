@@ -71,7 +71,11 @@ export async function action({ request }: Route.ActionArgs) {
   const llm = getAi(ai);
   let reading: ScreenshotReading;
   try {
-    reading = await readHoldingsFromImage(llm, new Uint8Array(await image.arrayBuffer()));
+    reading = await readHoldingsFromImage(
+      llm,
+      new Uint8Array(await image.arrayBuffer()),
+      request.signal,
+    );
   } catch (err) {
     const failure = aiFailureResponse(err);
     if (failure) return failure;

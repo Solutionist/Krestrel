@@ -21,6 +21,13 @@ describe("redactPii", () => {
     expect(redactPii("pay with 4111 1111 1111 1111.").text).toBe("pay with [redacted card].");
   });
 
+  it("finds a valid card next to another digit group and redacts only the card", () => {
+    expect(redactPii("Card 4111111111111111 123").text).toBe("Card [redacted card] 123");
+    const text = redactPii("Ref 12 4111 1111 1111 1111").text;
+    expect(text).toContain("[redacted card]");
+    expect(text).not.toContain("4111 1111 1111");
+  });
+
   it("leaves numbers that fail their checksum alone", () => {
     expect(redactPii("code DE00 ABCD EFGH IJKL MNOP QR x").found).toEqual({});
     expect(redactPii("ref 4111111111111112 x").found).toEqual({});

@@ -17,7 +17,15 @@ const Schema = z.object({ answer: z.number() });
 const request = { system: "sys", prompt: "data", schema: Schema };
 
 function result(partial: Partial<SpawnResult>): SpawnResult {
-  return { code: 0, stdout: "", stderr: "", timedOut: false, spawnError: null, ...partial };
+  return {
+    code: 0,
+    stdout: "",
+    stderr: "",
+    timedOut: false,
+    aborted: false,
+    spawnError: null,
+    ...partial,
+  };
 }
 
 function client(run: RunProcess, env: Record<string, string> = {}, model?: string) {
@@ -261,4 +269,32 @@ describe("Claude CLI client with a real child process", () => {
       delete process.env.ANTHROPIC_API_KEY;
     }
   });
+
+  it("stops the CLI when the caller aborts and frees the client for the next call", async () => {
+    const fake = fileURLToPath(new URL("../../../tests/fixtures/fake-claude.mjs", import.meta.url));
+    chmodSync(fake, 0o755);
+    const scratchDir = realpathSync(mkdtempSync(join(tempRoot, "kc-abort-")));
+    const llm = createClaudeCliClient({ env: { CLAUDE_CLI_PATH: fake }, logger }, { scratchDir })();
+    const controller = new AbortController();
+    // Real timer on purpose: the abort must reach a running child process, not a fake clock.
+    setTimeout(() => controller.abort(), 200);
+    const error = await llm
+      .generateStructured({
+        system: "s",
+        prompt: "FAKE_HANG",
+        schema: z.unknown(),
+        timeoutMs: 60_000,
+        signal: controller.signal,
+      })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).code).toBe("failed");
+
+    const { data } = await llm.generateStructured({
+      system: "s",
+      prompt: "after",
+      schema: z.object({ stdin: z.string() }),
+    });
+    expect(data.stdin).toBe("after");
+  }, 15_000);
 });

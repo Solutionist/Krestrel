@@ -7,6 +7,7 @@ const DB_TESTS = [
   "app/.server/market/db/**/*.test.ts",
   "app/.server/market/hub.test.ts",
   "app/.server/market/alert-engine.test.ts",
+  "app/.server/market/backfill.test.ts",
   "app/.server/market/daily-closes.test.ts",
 ];
 

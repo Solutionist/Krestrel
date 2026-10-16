@@ -48,6 +48,11 @@ describe("ollamaConfig", () => {
     expect(() => client(fetch, { OLLAMA_URL: "http://10.0.0.5:11434" })).toThrow(ConfigError);
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("reports an unparseable URL as a config error, not a crash", () => {
+    expect(() => ollamaConfig({ OLLAMA_URL: "127.0.0.1:11434" })).toThrow(ConfigError);
+    expect(() => ollamaConfig({ OLLAMA_URL: "127.0.0.1:11434" })).toThrow(/OLLAMA_URL/);
+  });
 });
 
 describe("Ollama client", () => {
@@ -104,6 +109,23 @@ describe("Ollama client", () => {
       throw new DOMException("The operation timed out.", "TimeoutError");
     });
     expect((await errorOf(client(slow).generateStructured(request))).code).toBe("timeout");
+  });
+
+  it("stops with a plain error when the caller aborts", async () => {
+    const hanging = vi.fn<typeof fetch>(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("This operation was aborted", "AbortError")),
+          );
+        }),
+    );
+    const controller = new AbortController();
+    const pending = errorOf(
+      client(hanging).generateStructured({ ...request, signal: controller.signal }),
+    );
+    controller.abort();
+    expect((await pending).code).toBe("failed");
   });
 
   it("says the model can't read images when Ollama rejects them", async () => {

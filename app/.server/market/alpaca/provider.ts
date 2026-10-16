@@ -67,6 +67,8 @@ const HANDSHAKE_TIMEOUT_MS = 15_000;
 const REST_MIN_SPACING_MS = 350;
 const RATE_LIMIT_FALLBACK_WAIT_MS = 60_000;
 const MAX_RATE_LIMIT_RETRIES = 3;
+/** A hung REST request is abandoned after this long. */
+const REST_TIMEOUT_MS = 60_000;
 
 const REASON_RECONNECTING = "Reconnecting to Alpaca…";
 const REASON_CONNECTION_LOST = "Lost the connection to Alpaca. Reconnecting automatically.";
@@ -334,7 +336,10 @@ export function createAlpacaProvider(
   async function send(url: URL): Promise<Response> {
     for (let retries = 0; ; retries += 1) {
       await takeTurn();
-      const response = await io.fetch(url, { headers: authHeaders });
+      const response = await io.fetch(url, {
+        headers: authHeaders,
+        signal: AbortSignal.timeout(REST_TIMEOUT_MS),
+      });
       if (response.status !== 429 || retries >= MAX_RATE_LIMIT_RETRIES) return response;
       // X-RateLimit-Reset is the UNIX epoch second when the window resets.
       const untilReset = Number(response.headers.get("X-RateLimit-Reset")) * 1000 - io.now();

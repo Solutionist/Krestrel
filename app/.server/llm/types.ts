@@ -18,6 +18,8 @@ export interface StructuredRequest<T extends z.ZodType> {
   webSearch?: boolean;
   /** Overrides the backend's default timeout for this call. */
   timeoutMs?: number;
+  /** Aborts the model run when the HTTP client goes away. */
+  signal?: AbortSignal;
 }
 
 export interface StructuredResult<T> {

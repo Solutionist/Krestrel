@@ -127,7 +127,9 @@ function writeChecked(
     const exists = await tx
       .select({ id: portfolios.id })
       .from(portfolios)
-      .where(eq(portfolios.id, portfolioId));
+      .where(eq(portfolios.id, portfolioId))
+      // Holds the row so a concurrent delete waits until these trades are written.
+      .for("share");
     if (exists.length === 0) {
       return { ok: false, code: "not_found", message: "That portfolio no longer exists." };
     }

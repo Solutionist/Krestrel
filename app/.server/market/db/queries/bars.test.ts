@@ -4,10 +4,10 @@ import type { Bar } from "~/lib/market";
 
 import { setupTestDatabase } from "../../../../../tests/db/test-db";
 import {
+  dailyBounds,
   getCalendarCandles,
   getCandles,
   latestBarTime,
-  latestDailyDay,
   upsertBars,
   upsertDailyBars,
 } from "./bars";
@@ -239,10 +239,13 @@ describe("daily history and calendar candles (ADR 0011)", () => {
     liveSource: LIVE,
   });
 
-  it("upserts daily bars idempotently and reports the newest day", async () => {
+  it("upserts daily bars idempotently and reports the stored day range", async () => {
     await upsertDailyBars(db, [daily("2026-10-12", 10), daily("2026-10-13", 11)]);
     await upsertDailyBars(db, [daily("2026-10-13", 11.5)]);
-    expect(await latestDailyDay(db, "AAPL", HIST)).toBe("2026-10-13");
+    expect((await dailyBounds(db, ["AAPL"], HIST)).get("AAPL")).toEqual({
+      first: "2026-10-12",
+      last: "2026-10-13",
+    });
     const candles = await getCalendarCandles(
       db,
       query("1D", "2026-10-01T00:00:00Z", "2026-10-14T00:00:00Z"),

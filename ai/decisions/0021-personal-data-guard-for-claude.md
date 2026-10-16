@@ -20,6 +20,7 @@ The owner chose **on-device auto-masking with a preview** for screenshots, over 
 
 - **Shared rules** (`app/lib/pii.ts`, isomorphic):
   - `redactPii(text)` replaces email, phone (needs two separators), SSN, card (Luhn; contiguous only at 15–16 digits), IBAN (mod-97) and labelled account numbers ("Account: 1234-5678") with `[redacted <kind>]`, and counts them by kind.
+  - A valid card inside a longer digit run ("4111111111111111 123") is found at digit-group boundaries: the widest run of whole groups that passes the card checks is replaced, and the other digits stay.
   - Number patterns refuse to start or end inside a longer number, so prices, amounts, volumes, epoch timestamps and dates are untouched. A test checks that a real outlook prompt passes unchanged.
 - **Text guard** (`app/.server/llm/claude-cli.ts`): every Claude prompt and system prompt goes through `redactPii` before the CLI starts. The log records only counts (`personal data redacted from a Claude prompt`), never the values.
 - **CLI context:**

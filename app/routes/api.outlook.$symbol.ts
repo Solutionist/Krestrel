@@ -55,16 +55,20 @@ export async function action({ params, request }: Route.ActionArgs) {
         logger,
       ),
     ]);
-    const { outlook, model: usedModel } = await generateOutlook(llm, {
-      symbol: symbol.data,
-      timeframe,
-      candles,
-      analysis,
-      plan,
-      news,
-      now: Date.now(),
-      research,
-    });
+    const { outlook, model: usedModel } = await generateOutlook(
+      llm,
+      {
+        symbol: symbol.data,
+        timeframe,
+        candles,
+        analysis,
+        plan,
+        news,
+        now: Date.now(),
+        research,
+      },
+      request.signal,
+    );
     return Response.json({
       ok: true,
       provider: llm.displayName,

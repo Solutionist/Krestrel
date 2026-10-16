@@ -47,6 +47,5 @@ export type StreamEvent = {
   [E in StreamEventName]: { event: E; data: StreamEventPayload<E> };
 }[StreamEventName];
 
-/** Seconds between `: ping` comments that keep idle connections open. */
-export const HEARTBEAT_MS = 15_000;
 /** Milliseconds between `: ping` comments that keep idle connections open. */
+export const HEARTBEAT_MS = 15_000;

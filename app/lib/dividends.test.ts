@@ -269,6 +269,15 @@ describe("sharesHeldBefore", () => {
     expect(sharesHeldBefore(trades, "KO", "2026-10-10")).toBe(6);
     expect(sharesHeldBefore(trades, "KO", "2026-10-11")).toBe(13);
   });
+
+  it("treats float residue from a full sell-out as zero shares", () => {
+    const trades = [
+      { symbol: "KO", side: "sell", shares: 0.3, tradedOn: "2026-09-03" },
+      { symbol: "KO", side: "buy", shares: 0.1, tradedOn: "2026-09-01" },
+      { symbol: "KO", side: "buy", shares: 0.2, tradedOn: "2026-09-02" },
+    ] as const;
+    expect(sharesHeldBefore(trades, "KO", "2026-10-10")).toBe(0);
+  });
 });
 
 describe("dividendYield", () => {

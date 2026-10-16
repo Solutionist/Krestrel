@@ -77,16 +77,20 @@ export async function action({ request }: Route.ActionArgs) {
     ]);
     // Load the ticker listing while the model works, so checking its picks is instant afterwards.
     hub.warmAssets();
-    const { ideas: answer, model: usedModel } = await generateIdeas(llm, {
-      focus,
-      basis,
-      holdings: holdings.map((holding) => ({
-        symbol: holding.symbol,
-        weightPct: holding.weight * 100,
-      })),
-      now,
-      research,
-    });
+    const { ideas: answer, model: usedModel } = await generateIdeas(
+      llm,
+      {
+        focus,
+        basis,
+        holdings: holdings.map((holding) => ({
+          symbol: holding.symbol,
+          weightPct: holding.weight * 100,
+        })),
+        now,
+        research,
+      },
+      request.signal,
+    );
 
     // Drop tickers the provider says aren't listed; keep ones it couldn't check right now
     // (network blip) rather than discard the whole run.

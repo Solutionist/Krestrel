@@ -46,11 +46,15 @@ export function addToWatchlist(
 
 /** Removes `symbol` (its alerts cascade). Returns false when it was not on the list. */
 export async function removeFromWatchlist(db: Database, symbol: string): Promise<boolean> {
-  const removed = await db
-    .delete(watchlist)
-    .where(eq(watchlist.symbol, symbol))
-    .returning({ symbol: watchlist.symbol });
-  return removed.length > 0;
+  // Same lock as add/reorder, so a reorder never sees the list change mid-transaction.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('krestrel.watchlist'))`);
+    const removed = await tx
+      .delete(watchlist)
+      .where(eq(watchlist.symbol, symbol))
+      .returning({ symbol: watchlist.symbol });
+    return removed.length > 0;
+  });
 }
 
 /**

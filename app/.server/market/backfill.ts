@@ -1,9 +1,10 @@
 import type { Logger } from "pino";
 
 import { nyDay } from "~/lib/candles";
+import type { DailyBar } from "~/lib/market";
 
 import type { Database } from "./db/client";
-import { latestBarTime, latestDailyDay, upsertBars, upsertDailyBars } from "./db/queries/bars";
+import { dailyBounds, latestBarTime, upsertBars, upsertDailyBars } from "./db/queries/bars";
 import type { MarketDataProvider } from "./provider";
 
 const MINUTE = 60_000;
@@ -47,7 +48,8 @@ export function nextDay(day: string): string {
 
 /**
  * Incremental, idempotent history backfill (ADR 0005, ADR 0011), in two phases:
- * 1. Daily bars for the last `dailyYears`, up to (excluding) today's New York date.
+ * 1. Daily bars up to (excluding) today's New York date: the tail after the newest stored day,
+ *    and once per process the head back to `dailyYears` before the oldest stored day.
  * 2. 1-minute bars from the later of (now − days) and the newest stored bar, up to
  *    now − provider.historyDelayMs.
  * Each resumes from what is already stored. Jobs run one at a time so provider rate limits are
@@ -58,25 +60,34 @@ export function createBackfiller(deps: BackfillDeps): Backfiller {
   const now = deps.now ?? Date.now;
   let chain: Promise<void> = Promise.resolve();
   let closed = false;
+  // Symbols whose daily head reached the floor (or as far back as the provider has data).
+  const headDone = new Set<string>();
 
+  /** Stores every page; true only when all pages arrived (false on error or shutdown). */
   async function fetchAll<T>(
     label: string,
     batch: string[],
     pages: AsyncIterable<T[]>,
     store: (page: T[]) => Promise<void>,
     range: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const log = logger.child({ symbols: batch, kind: label });
     let stored = 0;
     try {
       for await (const page of pages) {
         await store(page);
         stored += page.length;
+        if (closed) {
+          log.info({ stored, ...range }, "backfill stopped for shutdown");
+          return false;
+        }
       }
       log.info({ stored, ...range }, "backfill complete");
+      return true;
     } catch (err) {
       // Partial pages are already stored; the next run resumes from the newest bar.
       log.error({ err, stored }, "backfill failed");
+      return false;
     }
   }
 
@@ -86,21 +97,56 @@ export function createBackfiller(deps: BackfillDeps): Backfiller {
     // day has been over for at least that long (just after midnight, yesterday is still "recent").
     const endDay = nyDay(now() - provider.historyDelayMs);
     const floorDay = nyDay(now() - deps.dailyYears * 365 * DAY);
-    const starts: Array<[string, string]> = [];
+    const stored = await dailyBounds(db, symbols, provider.historySource);
+    // Each job's symbols share one range; the job object is the batching key.
+    type Job = { start: string; end: string; head: boolean };
+    const jobs = new Map<string, Job>();
+    const starts: Array<[string, Job]> = [];
+    const addJob = (symbol: string, start: string, end: string, head = false) => {
+      if (start >= end) return;
+      const key = `${start}/${end}/${head}`;
+      const job = jobs.get(key) ?? { start, end, head };
+      jobs.set(key, job);
+      starts.push([symbol, job]);
+    };
     for (const symbol of symbols) {
-      const latest = await latestDailyDay(db, symbol, provider.historySource);
-      const start = latest && latest >= floorDay ? nextDay(latest) : floorDay;
-      if (start < endDay) starts.push([symbol, start]);
+      const bounds = stored.get(symbol);
+      if (!bounds || bounds.last < floorDay) {
+        addJob(symbol, floorDay, endDay);
+        continue;
+      }
+      if (floorDay < bounds.first && !headDone.has(symbol)) {
+        addJob(symbol, floorDay, bounds.first, true);
+      }
+      addJob(symbol, nextDay(bounds.last), endDay);
     }
-    for (const [startDay, batch] of batchesByStart(starts, provider.maxSymbolsPerHistoryRequest)) {
+    for (const [job, batch] of batchesByStart(starts, provider.maxSymbolsPerHistoryRequest)) {
       if (closed) return;
-      await fetchAll(
-        "daily",
+      const range = { from: job.start, to: job.end };
+      if (!job.head) {
+        await fetchAll(
+          "daily",
+          batch,
+          provider.getDailyBars(batch, job.start, job.end),
+          (page) => upsertDailyBars(db, page),
+          range,
+        );
+        continue;
+      }
+      // A partial head must never be stored: it would move the oldest stored day and look complete.
+      const held: DailyBar[] = [];
+      const complete = await fetchAll(
+        "daily-head",
         batch,
-        provider.getDailyBars(batch, startDay, endDay),
-        (page) => upsertDailyBars(db, page),
-        { from: startDay, to: endDay },
+        provider.getDailyBars(batch, job.start, job.end),
+        async (page) => {
+          held.push(...page);
+        },
+        range,
       );
+      if (!complete) continue;
+      if (held.length > 0) await upsertDailyBars(db, held);
+      for (const symbol of batch) headDone.add(symbol);
     }
   }
 

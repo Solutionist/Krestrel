@@ -2,6 +2,7 @@
 
 import * as z from "zod";
 
+import { nyDay } from "./candles";
 import { type QuoteSnapshot, SymbolSchema } from "./market";
 
 export const TRADE_SIDES = ["buy", "sell"] as const;
@@ -26,14 +27,36 @@ export interface Trade {
   createdAt: string;
 }
 
+/**
+ * Rounds to the DB column's scale (shares numeric(…,6), money numeric(…,4)) so the oversell and
+ * "more than 0" checks run on the values that will actually be stored.
+ */
+const toScale = (decimals: number) => (value: number) =>
+  Math.round(value * 10 ** decimals) / 10 ** decimals;
+
 /** Input for a new or edited trade (validated by the API and the trade form). */
 export const TradeInputSchema = z.object({
   symbol: SymbolSchema,
   side: z.enum(TRADE_SIDES),
-  shares: z.coerce.number().positive({ error: "Shares must be more than 0" }).max(1e9),
-  price: z.coerce.number().nonnegative({ error: "Price can't be negative" }).max(1e9),
-  fee: z.coerce.number().nonnegative({ error: "Fee can't be negative" }).max(1e9).default(0),
-  tradedOn: z.iso.date({ error: "Pick the trade date" }),
+  shares: z.coerce
+    .number({ error: "Enter shares as a number, like 10 or 2.5" })
+    .max(1e9)
+    .transform(toScale(6))
+    .pipe(z.number().positive({ error: "Shares must be more than 0" })),
+  price: z.coerce
+    .number({ error: "Enter the price as a number, like 187.50" })
+    .nonnegative({ error: "Price can't be negative" })
+    .max(1e9)
+    .transform(toScale(4)),
+  fee: z.coerce
+    .number({ error: "Enter the fee as a number" })
+    .nonnegative({ error: "Fee can't be negative" })
+    .max(1e9)
+    .transform(toScale(4))
+    .default(0),
+  tradedOn: z.iso
+    .date({ error: "Pick the trade date" })
+    .refine((day) => day <= nyDay(Date.now()), { error: "The trade date can't be in the future" }),
 });
 export type TradeInput = z.infer<typeof TradeInputSchema>;
 
@@ -198,6 +221,8 @@ export function portfolioTotals(positions: readonly ValuedPosition[]): Portfolio
   let costBasis = 0;
   let realized = 0;
   let dayChange = 0;
+  // Previous-close value of the positions that have a day change; unpriced-yesterday ones stay out.
+  let dayBase = 0;
   const unpriced: string[] = [];
   for (const position of positions) {
     realized += position.realized;
@@ -207,10 +232,12 @@ export function portfolioTotals(positions: readonly ValuedPosition[]): Portfolio
     }
     marketValue += position.marketValue;
     costBasis += position.costBasis;
-    dayChange += position.dayChange ?? 0;
+    if (position.dayChange !== null) {
+      dayChange += position.dayChange;
+      dayBase += position.marketValue - position.dayChange;
+    }
   }
   const unrealized = marketValue - costBasis;
-  const previousValue = marketValue - dayChange;
   return {
     marketValue,
     costBasis,
@@ -218,7 +245,7 @@ export function portfolioTotals(positions: readonly ValuedPosition[]): Portfolio
     unrealizedFraction: costBasis > 0 ? unrealized / costBasis : null,
     realized,
     dayChange,
-    dayChangeFraction: previousValue > 0 ? dayChange / previousValue : null,
+    dayChangeFraction: dayBase > 0 ? dayChange / dayBase : null,
     unpriced,
   };
 }

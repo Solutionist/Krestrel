@@ -179,19 +179,6 @@ export async function upsertDailyBars(db: Database, bars: readonly DailyBar[]): 
   }
 }
 
-/** Newest stored trading date (`YYYY-MM-DD`) of daily history, or null. */
-export async function latestDailyDay(
-  db: Database,
-  symbol: string,
-  source: BarSource,
-): Promise<string | null> {
-  const [row] = await db
-    .select({ latest: max(bars1d.day) })
-    .from(bars1d)
-    .where(and(eq(bars1d.symbol, symbol), eq(bars1d.source, source)));
-  return row?.latest ?? null;
-}
-
 /** Each symbol's first and last stored trading date (`YYYY-MM-DD`) of daily history; missing when none. */
 export async function dailyBounds(
   db: Database,

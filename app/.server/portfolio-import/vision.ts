@@ -85,6 +85,7 @@ export function cleanHoldings(raw: z.output<typeof ReadingSchema>["holdings"]): 
 export async function readHoldingsFromImage(
   llm: LlmClient,
   image: Uint8Array,
+  signal?: AbortSignal,
 ): Promise<ScreenshotReading> {
   const { data: reading } = await llm.generateStructured({
     system: SYSTEM,
@@ -92,6 +93,7 @@ export async function readHoldingsFromImage(
     images: [image],
     schema: ReadingSchema,
     timeoutMs: TIMEOUT_MS,
+    signal,
   });
   const mark = reading.currency?.trim() ?? "";
   return {

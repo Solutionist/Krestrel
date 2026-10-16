@@ -58,6 +58,7 @@ export async function action({ request }: Route.ActionArgs) {
       const profiles = await classifyStocks(
         getAi(input.ai),
         missing.map((symbol) => ({ symbol, name: listing.get(symbol)?.name ?? null })),
+        request.signal,
       );
       await saveModelProfiles(db, profiles);
     } catch (err) {
