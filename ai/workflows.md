@@ -31,7 +31,7 @@ Follow the checklist at the end of `ai/market-data.md`. The hub, bar writer, ale
 
 ## Upgrade a dependency safely
 
-1. `npm view <pkg> dist-tags` — only `latest` (no beta/rc/canary/next/experimental).
+1. `bun info <pkg> dist-tags` — only `latest` (no beta/rc/canary/next/experimental).
 2. Read the changelog/migration guide between current and target; check Context7 for the new version's API.
 3. Bump the exact pin in `package.json`, `bun install`.
 4. Run the full check plus `bun run build`, and smoke `bun run dev`.
@@ -39,7 +39,7 @@ Follow the checklist at the end of `ai/market-data.md`. The hub, bar writer, ale
 
 ## Bump Node LTS
 
-Update `.nvmrc`, `engines.node`, `@types/node`, and the CI Node version together; check `engines` of jsdom/vitest/react-router.
+Update `.nvmrc`, `engines.node` and `@types/node` together; check `engines` of jsdom/vitest/react-router.
 
 ## Restart after editing the market hub
 

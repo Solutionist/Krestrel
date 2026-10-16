@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phases 1–4 implemented (database, providers, hub, SSE/JSON routes, UI, alert engine). E2E and CI (Phase 5) pending.
+Status: implemented (1.0.0).
 
 ## Data flow
 
@@ -32,7 +32,7 @@ Upstream REST ────────►│   getBars / getSnapshots / getClock
 | `app/.server/market/provider.ts` | `MarketDataProvider` contract (ADR 0009) |
 | `app/.server/market/registry.ts` | `MARKET_PROVIDER` id → factory |
 | `app/.server/market/alpaca/` | Alpaca stream + REST, schemas, normalizers, config |
-| `app/.server/market/mock/` | Deterministic simulated provider (offline dev, E2E) |
+| `app/.server/market/mock/` | Deterministic simulated provider (offline dev, tests, README screenshots) |
 | `app/.server/market/backoff.ts` | Full-jitter exponential backoff |
 | `app/.server/market/hub.ts` | `MarketHub`: watchlist (limit = provider `maxSymbols`), quotes, clock polling, fan-out, `getNews` (last 30 days, ≤ 20, `[]` on failure), `warmAssets` / `verifyListed` (exact tickers against the cached listing, falling back to per-ticker lookups when the listing can't load; tickers it couldn't check are left out of the map so callers keep them; no watchlist change), `getQuotes` (one-off snapshots without subscribing, empty on failure) |
 | `app/.server/market/bar-writer.ts` | Coalesces live bars (250 ms) → idempotent upsert |

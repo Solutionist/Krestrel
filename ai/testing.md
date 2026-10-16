@@ -4,10 +4,9 @@
 
 | Suite | Runner | Location | Environment | Command |
 |---|---|---|---|---|
-| Unit | Vitest 5 project `unit` | `app/**/*.test.ts`, `tests/unit/**/*.test.ts` | node | `bun run test` |
-| Component | Vitest 5 project `dom` | `app/**/*.test.tsx`, `tests/unit/**/*.test.tsx` | jsdom 30 | `bun run test` |
-| DB + hub | Vitest project `db` | `app/.server/market/db/**/*.test.ts`, `app/.server/market/hub.test.ts`, `app/.server/market/alert-engine.test.ts` | real Postgres (`<db>_test`), files sequential | `bun run test` (needs `bun run db:up`) |
-| E2E (Phase 5) | Playwright | `tests/e2e/` | Chromium, `MARKET_PROVIDER=mock` | `bun run test:e2e` |
+| Unit | Vitest 5 project `unit` | `app/**/*.test.ts` | node | `bun run test` |
+| Component | Vitest 5 project `dom` | `app/**/*.test.tsx` | jsdom 30 | `bun run test` |
+| DB + hub | Vitest project `db` | `app/.server/market/db/**/*.test.ts`, `app/.server/market/hub.test.ts`, `app/.server/market/alert-engine.test.ts`, `app/.server/market/daily-closes.test.ts`, `app/.server/market/backfill.test.ts` | real Postgres (`<db>_test`), files sequential | `bun run test` (needs `bun run db:up`) |
 
 Run one project: `bun run vitest run --project unit`. Watch: `bun run vitest`.
 
@@ -26,7 +25,7 @@ Run one project: `bun run vitest run --project unit`. Watch: `bun run vitest`.
 - Bar upsert idempotency, timeframe bucketing: against real Postgres.
 - Env validation, watchlist 30-symbol limit.
 - Components: watchlist row rendering, price formatting.
-- Route modules typed with `Route.*`: E2E, not unit (React Router docs).
+- Route modules typed with `Route.*`: call their `loader`/`action` with a `Request` (see `app/routes/api.alerts.test.ts`).
 
 ## Rules
 
@@ -42,7 +41,3 @@ Run one project: `bun run vitest run --project unit`. Watch: `bun run vitest`.
 ## Provider tests
 
 Providers take injectable deps (`openSocket`/`fetch`/`now`/`random`/`sleep` for Alpaca; `now`/`random`/`tickIntervalMs` for mock) and a silent pino logger. Hub tests use a fake `MarketDataProvider` object — the contract boundary — against the real test DB.
-
-## CI (Phase 5)
-
-GitHub Actions on push/PR: `bun install --frozen-lockfile`, `bun run typecheck`, `bun run lint`, `bun run test`, with a `postgres:18-alpine` service container.

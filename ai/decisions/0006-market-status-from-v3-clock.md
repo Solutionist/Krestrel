@@ -1,6 +1,6 @@
 # 0006: Market status from `/v3/clock`, not `/v2/clock`
 
-- Status: proposed (implemented in Phase 2; verify against a live response first)
+- Status: accepted (implemented in Phase 2)
 - Date: 2026-10-14
 
 ## Context
@@ -12,7 +12,7 @@ The product needs four states: open, closed, pre-market, after-hours. Alpaca's `
 - Use `GET {tradingBase}/v3/clock?markets=NYSE`, map `pre → pre-market`, `core → open`, `post → after-hours`, `closed → closed`. `lunch` does not occur for NYSE; treat it as `open` and log a warning if seen.
 - Re-poll at `phase_until` (plus a small jitter) instead of on a fixed interval.
 - `tradingBase` is the paper host `https://paper-api.alpaca.markets` by default (free Basic plan keys are usually paper keys); configurable.
-- Fallback if `/v3/clock` fails validation: `/v2/clock` for open/closed plus `/v2/calendar` `session_open`/`session_close` (HHMM, ET) to derive pre/post.
+- No fallback: on failure the hub logs, keeps the market phase unknown and re-polls after 60 s.
 
 ## Consequences
 

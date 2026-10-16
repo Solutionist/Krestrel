@@ -1,6 +1,6 @@
 # Database
 
-Status: implemented in Phase 1 (`app/.server/market/db/`, migration `drizzle/0000_init.sql`). Sources: Drizzle docs (Context7 `/drizzle-team/drizzle-orm-docs`), published package typings, PostgreSQL 18 docs, Docker Hub `postgres` README.
+Status: implemented (`app/.server/market/db/`, migrations `drizzle/0000`–`0005`). Sources: Drizzle docs (Context7 `/drizzle-team/drizzle-orm-docs`), published package typings, PostgreSQL 18 docs, Docker Hub `postgres` README.
 
 ## Version and Docker
 
@@ -11,7 +11,7 @@ Status: implemented in Phase 1 (`app/.server/market/db/`, migration `drizzle/000
 
 ## Schema (`app/.server/market/db/schema.ts`)
 
-`watchlist(symbol pk, position, added_at)`, `bars_1m(symbol, source, ts, open, high, low, close, volume, trade_count, vwap; pk (symbol, source, ts))`, `alerts(id uuid default uuidv7(), symbol → watchlist ON DELETE CASCADE, direction check above|below, price, active, created_at, triggered_at, trigger_price)` + partial index `alerts(symbol) WHERE active`, `portfolios(id uuidv7, name unique, created_at)`, `trades(id uuidv7, portfolio_id → portfolios ON DELETE CASCADE, symbol, side check buy|sell, shares numeric(18,6) > 0, price ≥ 0, fee ≥ 0 default 0, traded_on date, created_at)` + index `(portfolio_id, symbol)` (ADR 0013). `source` is free-form text owned by providers (ADR 0009).
+`watchlist(symbol pk, position, added_at)`, `bars_1m(symbol, source, ts, open, high, low, close, volume, trade_count, vwap; pk (symbol, source, ts))`, `alerts(id uuid default uuidv7(), symbol → watchlist ON DELETE CASCADE, direction check above|below, price, active, created_at, triggered_at, trigger_price)` + partial index `alerts(symbol) WHERE active`, `portfolios(id uuidv7, name unique, created_at)`, `trades(id uuidv7, portfolio_id → portfolios ON DELETE CASCADE, symbol, side check buy|sell, shares numeric(18,6) > 0, price ≥ 0, fee ≥ 0 default 0, traded_on date, created_at)` + index `(portfolio_id, symbol)` (ADR 0013), `stock_profiles(symbol pk, sector check one of the 11 GICS sectors or null, style check growth|dividend|risky or null, source check model|owner, updated_at)` (ADR 0019), `dividend_overrides(portfolio_id → portfolios ON DELETE CASCADE, symbol, ex_date, amount ≥ 0, updated_at; pk (portfolio_id, symbol, ex_date))` (ADR 0025), `portfolio_targets(portfolio_id → portfolios ON DELETE CASCADE, symbol, weight numeric(7,4) > 0 and ≤ 100, updated_at; pk (portfolio_id, symbol))` (ADR 0026). `source` is free-form text owned by providers (ADR 0009).
 
 Drizzle syntax notes (0.45.4):
 
@@ -39,10 +39,10 @@ Prices `numeric({ precision: 14, scale: 4, mode: "number" })`, volume `bigint({ 
 ## Modules and conventions
 
 - `client.ts`: pure `createDatabase(url, options)` (no env access; used by tests). `instance.ts`: the app pool, cached on `globalThis` for HMR. Route/hub code imports `db` from `instance.ts`.
-- All SQL in `app/.server/market/db/queries/{bars,watchlist,alerts,portfolios}.ts`. Every query function takes `db` as its first argument.
-- `watchlist.ts`: `addToWatchlist(db, symbol, maxSymbols)` returns a typed result (`duplicate` | `limit`); add/reorder are serialized with `pg_advisory_xact_lock`. `reorderWatchlist` only accepts an exact permutation.
+- All SQL in `app/.server/market/db/queries/{bars,watchlist,alerts,portfolios,portfolio-targets,dividend-overrides,stock-profiles,health}.ts`. Every query function takes `db` as its first argument.
+- `watchlist.ts`: `addToWatchlist(db, symbol, maxSymbols)` returns a typed result (`duplicate` | `limit`); add, remove and reorder are serialized with `pg_advisory_xact_lock`. `reorderWatchlist` only accepts an exact permutation.
 - `bars.ts`: `upsertBars` (chunks of 1000 rows, de-duplicates repeated keys in one call, last wins), `latestBarTime`, `getCandles`.
-- `portfolios.ts`: portfolio names are unique ignoring case (checked under an advisory lock). `addTrade`/`updateTrade`/`deleteTrade` replay the portfolio's trades with the change applied (`computePositions`) under a per-portfolio advisory lock and return `oversell` instead of writing when a sell would exceed the shares held on its date.
+- `portfolios.ts`: portfolio names are unique ignoring case (checked under an advisory lock). `addTrades`/`updateTrade`/`deleteTrade` replay the portfolio's trades with the change applied (`computePositions`) under a per-portfolio advisory lock and return `oversell` instead of writing when a sell would exceed the shares held on its date.
 - `alerts.ts`: `markAlertTriggered` is a conditional `UPDATE … WHERE active RETURNING`, the fire-once guarantee. `createAlert` returns `null` when the symbol isn't on the watchlist (foreign-key violation, code 23503); `listRecentAlerts(db, since)` returns active alerts plus those fired since then (ADR 0023).
 - `portfolio-targets.ts`: `listTargets` (largest first) and `replaceTargets`, which locks the portfolio row (`SELECT … FOR UPDATE`) and swaps the whole set in one transaction; false when the portfolio is gone (ADR 0026).
 - `dividend-overrides.ts`: `listDividendOverrides(db, portfolioIds)`, `setDividendOverride` (upsert on portfolio + symbol + ex-date after `SELECT … FOR SHARE` on the portfolio row; false when the portfolio is gone) and `clearDividendOverride` (ADR 0025).

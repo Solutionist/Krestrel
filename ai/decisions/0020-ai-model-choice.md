@@ -1,7 +1,7 @@
 # 0020: Claude or a local model for every AI feature
 
-- Status: accepted (owner request, 2026-10-16)
-- Date: 2026-10-16
+- Status: accepted (owner request, 2026-10-15)
+- Date: 2026-10-15
 
 ## Context
 

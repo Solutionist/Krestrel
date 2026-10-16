@@ -11,10 +11,10 @@ React Router 8 documents no server-startup hook for `react-router-serve` or the 
 
 ## Decision
 
-- `app/.server/market/hub.ts` exports `getMarketHub()`. The hub instance is stored on `globalThis` under a namespaced key, so module re-evaluation during HMR reuses the existing hub and its socket.
+- `app/.server/market/instance.ts` exports `getMarketHub()`. The hub instance is stored on `globalThis` under a namespaced key, so module re-evaluation during HMR reuses the existing hub and its socket.
 - The hub is started idempotently from `app/entry.server.tsx` module scope. `getMarketHub()` also starts it lazily as a fallback.
 - Nothing else may construct a provider or open a socket. Routes, the bar writer, and the alert engine subscribe to hub events.
-- Dev server and production server both use `strictPort` / a fixed `PORT`, so an accidental second server process fails fast instead of opening a second upstream connection on another port.
+- The dev server uses `strictPort` and `bun run start` sets a fixed `HOST=127.0.0.1 PORT=3000`, so an accidental second server process fails fast instead of opening a second upstream connection on another port.
 
 ## Consequences
 

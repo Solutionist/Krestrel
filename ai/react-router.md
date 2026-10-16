@@ -61,4 +61,4 @@ Hidden by default. `bunx react-router reveal` writes `app/entry.server.tsx` / `a
 
 ## Testing
 
-`createRoutesStub` (from `react-router`) is for reusable components that use router hooks. Route modules typed with `Route.*` are covered by Playwright instead (`ai/testing.md`).
+`createRoutesStub` (from `react-router`) is for reusable components that use router hooks. Route modules typed with `Route.*` are tested by calling their `loader`/`action` with a `Request` (see `app/routes/api.alerts.test.ts`).

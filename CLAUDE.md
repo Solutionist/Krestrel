@@ -5,18 +5,18 @@ Personal, self-hosted, real-time NYSE/Nasdaq ticker. Single user, runs locally. 
 ## Stack
 React Router 8 (framework mode) · React 19.3 · TypeScript 7 strict · Tailwind CSS 4 · Vite 8 ·
 Lightweight Charts 5 · Drizzle ORM + postgres.js · PostgreSQL 18 (Docker) · Zod 4 · pino 10 ·
-Vitest 5 · Playwright · Biome 2 · Bun (package manager only) · Node 24 LTS. Exact versions: `ai/decisions/0001-stack.md`.
+Vitest 5 · Biome 2 · Bun (packages and scripts) · Node 24 LTS. Exact versions: `ai/decisions/0001-stack.md`.
 
 ## Commands
 - Toolchain: Node 24 (`.nvmrc`) runs the app; Bun installs packages and runs scripts (`bun install`, `bun run <script>`, `bunx <bin>`). Never use npm/pnpm/yarn.
 - Always `bun run test`, never bare `bun test` (that is Bun's own test runner, not Vitest).
 - `bun run dev`: dev server on http://127.0.0.1:5173 (loopback only, `strictPort`)
-- `bun run build` / `bun run start`: production build / serve (`HOST` defaults to 127.0.0.1)
+- `bun run build` / `bun run start`: production build / serve on http://127.0.0.1:3000
 - `bun run typecheck` (typegen + tsc) · `bun run lint` (biome check) · `bun run format` (biome check --write) · `bun run test` (vitest run)
 - Env: `cp .env.example .env`, fill `ALPACA_KEY_ID`/`ALPACA_SECRET_KEY` (or `MARKET_PROVIDER=mock`)
 - `bun run db:up` / `bun run db:down`: start/stop Postgres only (Docker, 127.0.0.1:5432)
 - Full stack in Docker: `docker compose up -d --build --wait` → http://127.0.0.1:3000
-- `bun run db:generate` / `db:migrate` / `db:studio` (drizzle-kit; the server also auto-applies migrations on boot). `bun run test:e2e` arrives in Phase 5
+- `bun run db:generate` / `db:migrate` / `db:studio` (drizzle-kit; the server also auto-applies migrations on boot)
 - Offline dev without Alpaca keys: `MARKET_PROVIDER=mock` in `.env`
 - Schema changes: `bun run db:generate` then `bun run db:migrate` (never `push` on real data)
 
@@ -25,7 +25,7 @@ Vitest 5 · Playwright · Biome 2 · Bun (package manager only) · Node 24 LTS. 
 - `app/.server/`: server-only (env, logger, db, market data). Never import from client code
 - `app/.server/market/`: provider interface, Alpaca provider, MarketHub singleton, alert engine, bar writer
 - `app/lib/`: isomorphic types, Zod schemas, formatters
-- `tests/`: setup, fixtures (`tests/fixtures/alpaca/`), e2e. Unit tests sit next to code as `*.test.ts(x)`
+- `tests/`: setup, fixtures (`tests/fixtures/alpaca/`). Unit tests sit next to code as `*.test.ts(x)`
 - `ai/`: detailed guidelines and ADRs (see below)
 
 ## Always
@@ -41,7 +41,7 @@ Vitest 5 · Playwright · Biome 2 · Bun (package manager only) · Node 24 LTS. 
 - Before finishing: `bun run typecheck && bun run lint && bun run test`.
 
 ## Never
-- Add trading, auth, multi-user, public hosting, or data sharing (personal data licence). Sole exceptions: AI features the owner set to Claude (ADR 0012, 0020), and Tavily search queries for local models when the owner adds `TAVILY_API_KEY` (ADR 0020). Fetching exchange rates (currency codes only, ADR 0013) shares no data; portfolios record trades but never place orders.
+- Add trading, auth, multi-user, public hosting, or data sharing (personal data licence). Sole exceptions: AI features the owner set to Claude (ADR 0012, 0020), and Tavily search queries for local models when the owner adds `TAVILY_API_KEY` (ADR 0020). Fetching exchange rates (currency codes and a start date only, ADR 0013, 0027) shares no data; portfolios record trades but never place orders.
 - Touch Claude credentials: Claude features only run the user's own `claude` CLI (`app/.server/llm/`). Local models only via the owner's loopback Ollama.
 - Bind servers to anything but loopback.
 - Use beta/rc/canary packages or `unstable_*` APIs.

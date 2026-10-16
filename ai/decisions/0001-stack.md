@@ -43,20 +43,16 @@ Krestrel must use the latest stable release of every dependency (no beta/rc/cana
 | pino | 10.4.0 | Logging |
 | pino-pretty | 13.2.0 | Dev log formatting (dev only) |
 | lightweight-charts | 5.2.1 | TradingView chart (ADR 0010) |
-| @fontsource/ibm-plex-sans, @fontsource/ibm-plex-mono | 5.3.0 | Self-hosted UI fonts |
+| @fontsource-variable/geist, @fontsource-variable/geist-mono | 5.3.0 | Self-hosted UI fonts (ADR 0015) |
+| @phosphor-icons/react | 2.1.10 | Icons (ADR 0015) |
 | tesseract.js | 7.0.0 | On-device OCR that masks screenshots before Claude sees them (ADR 0021) |
+| tesseract.js-core | 7.0.0 | On-device OCR core, served from `/ocr/*` (ADR 0021) |
 | @tesseract.js-data/eng | 1.0.0 | English OCR model, served locally from `/ocr/*` (ADR 0021) |
-
-Resolved now, installed in the phase that first needs them:
-
-| Package | Version | Phase |
-|---|---|---|
-| @playwright/test | 1.64.0 | 5 |
 
 ## Consequences
 
 - TypeScript 7 removed `baseUrl`, `esModuleInterop: false`, `moduleResolution: node10`, `downlevelIteration`, and `target: ES5`. The tsconfig uses none of them. `types` must be listed explicitly (`["node", "vite/client"]`).
 - React Router 8 is ESM-only, needs Node ≥ 22.22, React ≥ 19.2.7, Vite ≥ 7, and always enables middleware (`context` is a `RouterContextProvider`).
 - Bun replaces pnpm: `bun install`, `bun run <script>`, `bunx <bin>`. Bare `bun test` runs Bun's own runner, not Vitest — always `bun run test`. Package bins still execute on Node (no `--bun`), so runtime behaviour matches production.
-- Re-check Node in late October 2026: when v26 becomes Active LTS, bump `.nvmrc`, `engines`, `@types/node`, and CI together (see `ai/workflows.md`).
+- Re-check Node in late October 2026: when v26 becomes Active LTS, bump `.nvmrc`, `engines` and `@types/node` together (see `ai/workflows.md`).
 - Upgrades follow the dependency recipe in `ai/workflows.md`. Update this table in the same commit.
