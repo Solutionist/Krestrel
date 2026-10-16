@@ -1,6 +1,17 @@
 {
   "name": "krestrel",
   "version": "1.0.0",
+  "description": "Self-hosted, real-time NYSE/Nasdaq ticker and portfolio tracker that runs on your own machine (loopback only).",
+  "license": "MIT",
+  "author": "Solutionist",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Solutionist/Krestrel.git"
+  },
+  "homepage": "https://github.com/Solutionist/Krestrel#readme",
+  "bugs": {
+    "url": "https://github.com/Solutionist/Krestrel/issues"
+  },
   "private": true,
   "type": "module",
   "packageManager": "bun@1.4.3",
@@ -10,7 +21,7 @@
   "scripts": {
     "dev": "react-router dev",
     "build": "react-router build",
-    "start": "HOST=${HOST:-127.0.0.1} react-router-serve ./build/server/index.js",
+    "start": "HOST=127.0.0.1 PORT=3000 react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc",
     "lint": "biome check .",
     "format": "biome check --write .",
@@ -37,6 +48,7 @@
     "react-dom": "19.3.0",
     "react-router": "8.4.0",
     "tesseract.js": "7.0.0",
+    "tesseract.js-core": "7.0.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

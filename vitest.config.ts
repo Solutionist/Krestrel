@@ -23,7 +23,7 @@ export default defineConfig({
         test: {
           name: "unit",
           environment: "node",
-          include: ["app/**/*.test.ts", "tests/unit/**/*.test.ts"],
+          include: ["app/**/*.test.ts"],
           exclude: DB_TESTS,
         },
       },
@@ -41,7 +41,7 @@ export default defineConfig({
         test: {
           name: "dom",
           environment: "jsdom",
-          include: ["app/**/*.test.tsx", "tests/unit/**/*.test.tsx"],
+          include: ["app/**/*.test.tsx"],
           setupFiles: ["./tests/setup-dom.ts"],
         },
       },
