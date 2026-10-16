@@ -1,6 +1,7 @@
 import * as z from "zod";
 
 import { getMarketHub } from "~/.server/market/instance";
+import { crossSiteRejection } from "~/.server/same-origin";
 import { SymbolSchema } from "~/lib/market";
 
 import type { Route } from "./+types/api.watchlist";
@@ -22,15 +23,15 @@ export function loader() {
 }
 
 /**
- * POST /api/watchlist (JSON or form data):
+ * POST /api/watchlist (JSON):
  *   { intent: "add", symbol } | { intent: "remove", symbol } | { intent: "reorder", symbols }
  * Expected failures (limit, unknown symbol, …) return `{ ok: false, error }` with 4xx.
  */
 export async function action({ request }: Route.ActionArgs) {
-  const raw = request.headers.get("content-type")?.includes("application/json")
-    ? await request.json().catch(() => null)
-    : formToObject(await request.formData());
-  const parsed = ActionSchema.safeParse(raw);
+  const refused = crossSiteRejection(request);
+  if (refused) return refused;
+
+  const parsed = ActionSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return fail(400, "invalid", parsed.error.issues[0]?.message ?? "Invalid request");
   }
@@ -63,13 +64,4 @@ function fail(status: number, code: string, message: string): Response {
   return Response.json({ ok: false, error: { code, message } } satisfies WatchlistActionResult, {
     status,
   });
-}
-
-function formToObject(form: FormData): Record<string, unknown> {
-  const symbols = form.getAll("symbols").map(String);
-  const object: Record<string, unknown> = Object.fromEntries(
-    [...form.entries()].map(([key, value]) => [key, String(value)]),
-  );
-  if (symbols.length > 0) object.symbols = symbols;
-  return object;
 }

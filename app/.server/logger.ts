@@ -12,6 +12,11 @@ export const REDACT_PATHS = [
     name,
     `*.${name}`,
   ]),
+  // Env secrets by name, in case an env object or slice of it is logged.
+  ...["ALPACA_KEY_ID", "ALPACA_SECRET_KEY", "TAVILY_API_KEY"].flatMap((name) => [
+    name,
+    `*.${name}`,
+  ]),
   // Whole header objects: auth headers differ per provider, so none are ever logged.
   "headers",
   "*.headers",

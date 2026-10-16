@@ -14,7 +14,7 @@ const AlpacaEnvSchema = z.object({
   ALPACA_TRADING_URL: z.httpUrl().default("https://paper-api.alpaca.markets"),
   ALPACA_DATA_URL: z.httpUrl().default("https://data.alpaca.markets"),
   ALPACA_STREAM_URL: z
-    .url({ protocol: /^wss?$/, error: "must be a wss:// URL" })
+    .url({ protocol: /^wss$/, error: "must be a wss:// URL" })
     .default("wss://stream.data.alpaca.markets/v2"),
 });
 

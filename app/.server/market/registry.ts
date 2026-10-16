@@ -11,7 +11,7 @@ const PROVIDERS: Record<string, ProviderFactory> = {
 };
 
 export function createProvider(id: string, context: ProviderContext): MarketDataProvider {
-  const factory = PROVIDERS[id];
+  const factory = Object.hasOwn(PROVIDERS, id) ? PROVIDERS[id] : undefined;
   if (!factory) {
     throw new ConfigError(
       `Unknown MARKET_PROVIDER "${id}". Available: ${Object.keys(PROVIDERS).join(", ")}.`,

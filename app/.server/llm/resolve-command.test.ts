@@ -60,7 +60,15 @@ describe("resolveWindowsCommand", () => {
     expect(() => resolveWindowsCommand("claude", odd)).toThrow(/CLAUDE_CLI_PATH/);
   });
 
-  it("leaves the command alone when nothing on PATH matches, so spawn reports ENOENT", () => {
-    expect(resolveWindowsCommand("claude", dir({}))).toEqual({ command: "claude", args: [] });
+  it("throws ENOENT when nothing on PATH matches, never falling back to the bare name", () => {
+    let caught: unknown;
+    try {
+      resolveWindowsCommand("claude", dir({}));
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as NodeJS.ErrnoException).code).toBe("ENOENT");
+    expect((caught as Error).message).toBe("claude wasn't found on PATH");
   });
 });

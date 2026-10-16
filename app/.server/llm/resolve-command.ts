@@ -42,7 +42,10 @@ export function resolveWindowsCommand(
   pathEnv: string | undefined,
 ): ResolvedCommand {
   const found = candidates(command, pathEnv).find(isFile);
-  if (found === undefined) return { command, args: [] };
+  if (found === undefined) {
+    // Never fall back to the bare name: Windows would also search the cwd for it.
+    throw Object.assign(new Error(`${command} wasn't found on PATH`), { code: "ENOENT" });
+  }
   const direct = runnable(found);
   if (direct) return direct;
 

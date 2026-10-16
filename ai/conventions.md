@@ -27,8 +27,8 @@
 - One root logger in `app/.server/logger.ts`; modules use `logger.child({ mod: "alpaca-ws" })`.
 - Levels: `error` needs attention (auth failed, 406, DB down) · `warn` degraded but recovering (reconnect, schema mismatch on one message) · `info` lifecycle (connected, subscribed, backfill done) · `debug` per-message detail · `trace` raw frames (never in prod).
 - Pass errors as `{ err }` (std serializer).
-- Redact: `ALPACA_SECRET_KEY`, `ALPACA_KEY_ID`, `*.secret`, `*.key`, auth headers (`headers["apca-api-key-id"]`, `headers["apca-api-secret-key"]`). Never log the auth message or full env.
-- Dev: `pino-pretty` transport. Prod: JSON to stdout (no transport).
+- Redact (`REDACT_PATHS` in `app/.server/logger.ts`): `DATABASE_URL`; `key`, `secret`, `token`, `apiKey`, `password`, `authorization` at the top level and one level deep (`*.key` …); whole `headers` objects (top level and `*.headers`); `ALPACA_KEY_ID`, `ALPACA_SECRET_KEY`, `TAVILY_API_KEY` (top level and `*.`). Redaction is a safety net: never log the auth message or full env.
+- Dev: `pino-pretty` as an in-process stream (not a transport). Prod: JSON lines to stdout (no transport).
 
 ## Formatting and imports
 

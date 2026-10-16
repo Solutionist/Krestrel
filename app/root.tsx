@@ -11,9 +11,16 @@ import {
   ScrollRestoration,
 } from "react-router";
 
+import { requestGuard } from "~/.server/request-guard";
 import { THEME_SCRIPT, useApplyTheme } from "~/hooks/use-theme";
 
 import type { Route } from "./+types/root";
+
+// Refuses DNS-rebinding hosts and cross-site API calls (see app/.server/request-guard.ts).
+// Per-route crossSiteRejection checks stay as defence in depth.
+export const middleware: Route.MiddlewareFunction[] = [
+  ({ request }) => requestGuard(request) ?? undefined,
+];
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },

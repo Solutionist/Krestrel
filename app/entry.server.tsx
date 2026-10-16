@@ -25,6 +25,10 @@ export default function handleRequest(
   routerContext: EntryContext,
   _loadContext: RouterContextProvider,
 ) {
+  // Never render inside a frame (clickjacking).
+  responseHeaders.set("X-Frame-Options", "DENY");
+  responseHeaders.set("Content-Security-Policy", "frame-ancestors 'none'");
+
   // https://httpwg.org/specs/rfc9110.html#HEAD
   if (request.method.toUpperCase() === "HEAD") {
     return new Response(null, {

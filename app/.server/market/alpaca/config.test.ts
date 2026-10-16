@@ -59,4 +59,14 @@ describe("parseAlpacaConfig", () => {
     expect(parse).toThrow(/ALPACA_STREAM_URL: must be a wss:\/\/ URL/);
     expect(parse).not.toThrow(/super-secret-value/);
   });
+
+  it("rejects a cleartext ws:// stream URL, which would send the secret unencrypted", () => {
+    const parse = () =>
+      parseAlpacaConfig({
+        ALPACA_KEY_ID: "id",
+        ALPACA_SECRET_KEY: "secret",
+        ALPACA_STREAM_URL: "ws://stream.data.alpaca.markets/v2",
+      });
+    expect(parse).toThrow(/ALPACA_STREAM_URL: must be a wss:\/\/ URL/);
+  });
 });

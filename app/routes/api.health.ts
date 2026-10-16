@@ -1,6 +1,6 @@
-import { sql } from "drizzle-orm";
-
+import { logger } from "~/.server/logger";
 import { db } from "~/.server/market/db/instance";
+import { pingDatabase } from "~/.server/market/db/queries/health";
 import { getMarketHub } from "~/.server/market/instance";
 
 const DB_TIMEOUT_MS = 2000;
@@ -10,12 +10,15 @@ export async function loader() {
   const hub = getMarketHub();
   let database: { ok: true } | { ok: false; error: string };
   const timeout = Promise.withResolvers<never>();
-  const timer = setTimeout(() => timeout.reject(new Error("timed out")), DB_TIMEOUT_MS);
+  const timedOut = new Error("timed out");
+  const timer = setTimeout(() => timeout.reject(timedOut), DB_TIMEOUT_MS);
   try {
-    await Promise.race([db.execute(sql`SELECT 1`), timeout.promise]);
+    await Promise.race([pingDatabase(db), timeout.promise]);
     database = { ok: true };
   } catch (err) {
-    database = { ok: false, error: err instanceof Error ? err.message : "unreachable" };
+    // Driver errors can carry hosts and user names: log them, never return them.
+    logger.warn({ err }, "health check: database unreachable");
+    database = { ok: false, error: err === timedOut ? "timed out" : "unreachable" };
   } finally {
     clearTimeout(timer);
   }
