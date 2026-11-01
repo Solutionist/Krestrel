@@ -1,7 +1,7 @@
 # Krestrel app image. Local use only: compose publishes it on 127.0.0.1 (ADR 0007).
 # Bun installs packages and runs the build; Node 24 LTS runs the server (ADR 0001).
 
-FROM oven/bun:1.4.3-alpine AS bun
+FROM oven/bun:1.4.4-alpine AS bun
 
 FROM node:24-alpine AS base
 # Bun's musl build needs the C++ runtime.
